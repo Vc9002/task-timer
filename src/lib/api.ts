@@ -59,6 +59,8 @@ export interface TaskRecord {
   source: "local" | "todoist";
   external_id: string | null;
   completed_at: string | null;
+  tracked_seconds: number;
+  external_state: "active" | "completed" | "deleted" | "unknown";
 }
 
 export interface NewTask {
@@ -93,16 +95,9 @@ export function deleteTask(id: number): Promise<void> {
 
 // ---------- Today ----------
 
-export interface TodayTask {
-  id: number;
-  parent_task_id: number | null;
-  title: string;
-  status: string;
-  estimated_minutes: number | null;
-  due_at: string | null;
+export interface TodayTask extends TaskRecord {
   overdue: boolean;
-  source: string;
-  tracked_seconds: number;
+  context_only: boolean;
 }
 
 export interface TodayClassGroup {
@@ -291,4 +286,8 @@ export function switchTimer(sessionId: number, taskId: number): Promise<ActiveSe
 }
 export function recoverTimer(sessionId: number, durationSeconds: number): Promise<Session> {
   return invoke("recover_timer", { sessionId, durationSeconds });
+}
+
+export function scheduleTask(id: number, date: string | null): Promise<void> {
+  return invoke("schedule_task", { id, date });
 }

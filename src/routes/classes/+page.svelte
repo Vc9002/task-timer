@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import TaskTreeNode from "$lib/components/TaskTreeNode.svelte";
   import {
     listClasses,
     createClass,
@@ -8,7 +9,6 @@
     listTasksForClass,
     createTask,
     deleteTask,
-    setTaskStatus,
     getTaskHistory,
     type ClassRecord,
     type TaskRecord,
@@ -136,15 +136,6 @@
     }
   }
 
-  async function toggleComplete(classId: number, task: TaskRecord) {
-    try {
-      await setTaskStatus(task.id, task.status === "completed" ? "not_started" : "completed");
-      tasksByClass[classId] = await listTasksForClass(classId);
-    } catch (e) {
-      error = String(e);
-    }
-  }
-
   async function removeTask(classId: number, id: number) {
     try {
       await deleteTask(id);
@@ -197,7 +188,8 @@
             <button class="secondary" onclick={() => (editingClassId = null)}>Cancel</button>
           </div>
         {:else}
-          <div class="class-header" onclick={() => toggleExpand(c.id)}>
+          <div class="class-header">
+            <button class="secondary" aria-expanded={expanded === c.id} onclick={() => toggleExpand(c.id)}>Tasks</button>
             <span class="code">{c.course_code}</span>
             {#if c.name}<span class="name">{c.name}</span>{/if}
             <span class="semester">{c.semester}</span>
@@ -214,7 +206,7 @@
               <input placeholder="Est. minutes" type="number" bind:value={taskEstimate} />
               <select bind:value={taskParentId}>
                 <option value={null}>No parent</option>
-                {#each (tasksByClass[c.id] ?? []).filter((t) => !t.parent_task_id) as parent}
+                {#each (tasksByClass[c.id] ?? []).filter((t) => t.source === "local" && t.status !== "completed") as parent}
                   <option value={parent.id}>{parent.title}</option>
                 {/each}
               </select>
@@ -222,20 +214,12 @@
             </form>
 
             <ul class="task-list">
-              {#each tasksByClass[c.id] ?? [] as t (t.id)}
-                <li class:sub={t.parent_task_id}>
-                  <input
-                    type="checkbox"
-                    checked={t.status === "completed"}
-                    onchange={() => toggleComplete(c.id, t)}
-                  />
-                  <span class:done={t.status === "completed"}>{t.title}</span>
-                  {#if t.due_at}<span class="due">due {t.due_at}</span>{/if}
-                  {#if t.estimated_minutes}<span class="due">{t.estimated_minutes}m</span>{/if}
-                  <button class="delete" onclick={() => toggleHistory(t.id)}>History</button>
-                  <button class="delete" onclick={() => removeTask(c.id, t.id)}>Delete</button>
-                </li>
-                {#if historyTaskId === t.id && history}
+              {#each (tasksByClass[c.id] ?? []).filter(t => !(tasksByClass[c.id] ?? []).some(p => p.id === t.parent_task_id)) as t (t.id)}
+                <TaskTreeNode task={t} tasks={tasksByClass[c.id] ?? []} courseCode={c.course_code}
+                  onchanged={async () => { tasksByClass[c.id] = await listTasksForClass(c.id); }}
+                  onhistory={toggleHistory} ondelete={(id) => removeTask(c.id, id)} />
+              {/each}
+                {#if historyTaskId !== null && history}
                   <li class="history-panel">
                     <div class="history-summary">
                       <span>Total: {formatDurationShort(history.total_seconds)}</span>
@@ -261,7 +245,6 @@
                     </ul>
                   </li>
                 {/if}
-              {/each}
               {#if (tasksByClass[c.id] ?? []).length === 0}
                 <li class="empty">No tasks yet.</li>
               {/if}
@@ -414,28 +397,6 @@
     align-items: center;
     gap: 0.5rem;
     padding: 0.35em 0.4em;
-  }
-
-  .task-list li.sub {
-    margin-left: 1.5rem;
-  }
-
-  .task-list li span.done {
-    text-decoration: line-through;
-    color: #999;
-  }
-
-  .due {
-    font-size: 0.8em;
-    color: #888;
-  }
-
-  .delete {
-    margin-left: auto;
-    background: #e5e5e5;
-    color: #333;
-    font-size: 0.85em;
-    padding: 0.2em 0.6em;
   }
 
   .empty {

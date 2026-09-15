@@ -8,7 +8,7 @@ use commands::analytics::{
 };
 use commands::classes::{archive_class, create_class, list_classes, update_class};
 use commands::tasks::{
-    create_task, delete_task, list_tasks_for_class, set_task_status, update_task,
+    create_task, delete_task, list_tasks_for_class, schedule_task, set_task_status, update_task,
 };
 use commands::today::get_today;
 use commands::todoist::{
@@ -58,6 +58,7 @@ pub fn run() {
             list_tasks_for_class,
             create_task,
             update_task,
+            schedule_task,
             set_task_status,
             delete_task,
             get_today,

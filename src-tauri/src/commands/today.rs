@@ -1,28 +1,23 @@
+use super::tasks::{row_to_task, Task, TASK_SELECT};
 use crate::db::Db;
+use rusqlite::{params, Connection};
 use serde::Serialize;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use tauri::State;
 
 #[derive(Debug, Serialize)]
 pub struct TodayTask {
-    pub id: i64,
-    pub parent_task_id: Option<i64>,
-    pub title: String,
-    pub status: String,
-    pub estimated_minutes: Option<i64>,
-    pub due_at: Option<String>,
+    #[serde(flatten)]
+    pub task: Task,
     pub overdue: bool,
-    pub source: String,
-    /// Tracked seconds for this task plus all descendant subtasks, no double counting.
-    pub tracked_seconds: i64,
+    pub context_only: bool,
 }
-
 #[derive(Debug, Serialize)]
 pub struct TodayClassGroup {
     pub class_id: i64,
     pub course_code: String,
     pub tasks: Vec<TodayTask>,
 }
-
 #[derive(Debug, Serialize)]
 pub struct TodaySummary {
     pub groups: Vec<TodayClassGroup>,
@@ -31,124 +26,226 @@ pub struct TodaySummary {
     pub tracked_seconds_total: i64,
 }
 
-/// A task is "on Today" if: due today, overdue & incomplete (when enabled),
-/// or explicitly scheduled for today.
-const TODAY_TASK_IDS_SQL: &str = "
-    SELECT DISTINCT t.id FROM tasks t
-    WHERE t.status != 'completed' AND (t.source='local' OR (t.external_state='active' AND EXISTS (SELECT 1 FROM todoist_projects p WHERE p.todoist_id=t.todoist_project_id AND p.class_id=t.class_id))) AND (
-        date(t.due_at) = date('now', 'localtime')
-        OR (?1 = 1 AND t.due_at IS NOT NULL AND date(t.due_at) < date('now', 'localtime'))
-        OR t.scheduled_date = date('now', 'localtime')
-    )
-";
-
-/// Recursive CTE: sum of finished session durations for a task and all its descendants.
-const TRACKED_SECONDS_SQL: &str = "
-    WITH RECURSIVE descendants(id) AS (
-        SELECT ?1
-        UNION ALL
-        SELECT tasks.id FROM tasks JOIN descendants ON tasks.parent_task_id = descendants.id
-    )
-    SELECT COALESCE(SUM(
-        COALESCE(ts.final_duration_seconds,
-            CASE WHEN ts.end_ts IS NOT NULL
-                THEN CAST((julianday(ts.end_ts) - julianday(ts.start_ts)) * 86400 AS INTEGER)
-                     - ts.accumulated_pause_seconds
-                ELSE 0 END)
-    ), 0)
-    FROM time_sessions ts WHERE ts.task_id IN (SELECT id FROM descendants)
-";
+pub(crate) fn today_for(
+    conn: &Connection,
+    date: &str,
+    include_overdue: bool,
+) -> rusqlite::Result<TodaySummary> {
+    let eligible = "t.class_id IN (SELECT id FROM classes WHERE active=1) AND
+        (t.source='local' OR (t.external_state='active' AND EXISTS
+        (SELECT 1 FROM todoist_projects p WHERE p.todoist_id=t.todoist_project_id AND p.class_id=t.class_id)))";
+    let tasks: Vec<Task> = conn
+        .prepare(&format!("{TASK_SELECT} WHERE {eligible} ORDER BY t.id"))?
+        .query_map([], row_to_task)?
+        .collect::<Result<_, _>>()?;
+    let by_id: HashMap<i64, &Task> = tasks.iter().map(|t| (t.id, t)).collect();
+    let mut children: HashMap<i64, Vec<i64>> = HashMap::new();
+    for task in &tasks {
+        if let Some(parent) = task.parent_task_id {
+            children.entry(parent).or_default().push(task.id);
+        }
+    }
+    // Date-only due dates are floating local dates; timestamp deadlines use local time.
+    let seeds: Vec<i64> = conn.prepare(&format!("SELECT t.id FROM tasks t WHERE {eligible} AND t.status!='completed' AND (
+        CASE WHEN length(t.due_at)=10 THEN date(t.due_at) ELSE date(t.due_at,'localtime') END = ?1
+        OR (?2 AND CASE WHEN length(t.due_at)=10 THEN date(t.due_at) ELSE date(t.due_at,'localtime') END < ?1)
+        OR t.scheduled_date=?1)"))?.query_map(params![date,include_overdue], |r|r.get(0))?.collect::<Result<_,_>>()?;
+    let mut actionable = HashSet::new();
+    let mut pending = seeds;
+    while let Some(id) = pending.pop() {
+        if !actionable.insert(id) {
+            continue;
+        }
+        if let Some(ids) = children.get(&id) {
+            pending.extend(ids.iter().filter(|id| by_id[id].status != "completed"));
+        }
+    }
+    let mut included = actionable.clone();
+    for id in &actionable {
+        let mut parent = by_id[id].parent_task_id;
+        while let Some(pid) = parent {
+            let Some(task) = by_id.get(&pid) else {
+                break;
+            };
+            if !included.insert(pid) {
+                break;
+            }
+            parent = task.parent_task_id;
+        }
+    }
+    let mut groups: BTreeMap<i64, TodayClassGroup> = BTreeMap::new();
+    let mut estimate = 0;
+    for task in tasks {
+        if !included.contains(&task.id) {
+            continue;
+        }
+        let context_only = !actionable.contains(&task.id);
+        if !context_only {
+            estimate += task.estimated_minutes.unwrap_or(0);
+        }
+        let overdue = match &task.due_at {
+            Some(due) => conn.query_row("SELECT CASE WHEN length(?1)=10 THEN date(?1) ELSE date(?1,'localtime') END < ?2",params![due,date],|r|r.get::<_,Option<bool>>(0))?.unwrap_or(false),
+            None => false,
+        };
+        let code: String = conn.query_row(
+            "SELECT course_code FROM classes WHERE id=?1",
+            [task.class_id],
+            |r| r.get(0),
+        )?;
+        groups
+            .entry(task.class_id)
+            .or_insert_with(|| TodayClassGroup {
+                class_id: task.class_id,
+                course_code: code,
+                tasks: vec![],
+            })
+            .tasks
+            .push(TodayTask {
+                task,
+                overdue,
+                context_only,
+            });
+    }
+    // This header is actual time tracked today, including completed/archived work.
+    // Every session counts once, regardless of hierarchy or current task visibility.
+    let tracked_seconds_total = conn.query_row("SELECT COALESCE(SUM(final_duration_seconds),0) FROM time_sessions WHERE end_ts IS NOT NULL AND date(start_ts,'localtime')=?1",[date],|r|r.get(0))?;
+    let mut groups: Vec<_> = groups.into_values().collect();
+    groups.sort_by(|a, b| a.course_code.cmp(&b.course_code));
+    Ok(TodaySummary {
+        groups,
+        task_count: actionable.len() as i64,
+        estimated_minutes_total: estimate,
+        tracked_seconds_total,
+    })
+}
 
 #[tauri::command]
 pub fn get_today(db: State<Db>, include_overdue: bool) -> Result<TodaySummary, String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
-
-    let mut id_stmt = conn
-        .prepare(TODAY_TASK_IDS_SQL)
-        .map_err(|e| e.to_string())?;
-    let task_ids: Vec<i64> = id_stmt
-        .query_map([include_overdue as i64], |r| r.get(0))
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
-
-    let mut groups: std::collections::BTreeMap<i64, TodayClassGroup> =
-        std::collections::BTreeMap::new();
-    let mut task_count = 0i64;
-    let mut estimated_minutes_total = 0i64;
-    let mut tracked_seconds_total = 0i64;
-
-    let mut task_stmt = conn
-        .prepare("SELECT * FROM tasks WHERE id = ?1")
-        .map_err(|e| e.to_string())?;
-    let mut class_stmt = conn
-        .prepare("SELECT course_code FROM classes WHERE id = ?1")
-        .map_err(|e| e.to_string())?;
-    let mut tracked_stmt = conn
-        .prepare(TRACKED_SECONDS_SQL)
-        .map_err(|e| e.to_string())?;
-
-    for task_id in task_ids {
-        let row = task_stmt
-            .query_row([task_id], |row| {
-                Ok((
-                    row.get::<_, i64>("class_id")?,
-                    row.get::<_, Option<i64>>("parent_task_id")?,
-                    row.get::<_, String>("title")?,
-                    row.get::<_, String>("status")?,
-                    row.get::<_, Option<i64>>("estimated_minutes")?,
-                    row.get::<_, Option<String>>("due_at")?,
-                    row.get::<_, String>("source")?,
-                ))
-            })
-            .map_err(|e| e.to_string())?;
-        let (class_id, parent_task_id, title, status, estimated_minutes, due_at, source) = row;
-
-        let today_str = chrono::Local::now().format("%Y-%m-%d").to_string();
-        let overdue = due_at
-            .as_deref()
-            .map(|d| d < today_str.as_str())
-            .unwrap_or(false);
-
-        let tracked_seconds: i64 = tracked_stmt
-            .query_row([task_id], |r| r.get(0))
-            .map_err(|e| e.to_string())?;
-
-        task_count += 1;
-        estimated_minutes_total += estimated_minutes.unwrap_or(0);
-        // Only count top-level tracked time once toward the grand total to avoid
-        // double counting a parent's aggregate alongside its own subtask entries.
-        if parent_task_id.is_none() {
-            tracked_seconds_total += tracked_seconds;
-        }
-
-        let course_code: String = class_stmt
-            .query_row([class_id], |r| r.get(0))
-            .map_err(|e| e.to_string())?;
-
-        let group = groups.entry(class_id).or_insert_with(|| TodayClassGroup {
-            class_id,
-            course_code,
-            tasks: Vec::new(),
-        });
-
-        group.tasks.push(TodayTask {
-            id: task_id,
-            parent_task_id,
-            title,
-            status,
-            estimated_minutes,
-            due_at,
-            overdue,
-            source,
-            tracked_seconds,
-        });
-    }
-
-    Ok(TodaySummary {
-        groups: groups.into_values().collect(),
-        task_count,
-        estimated_minutes_total,
-        tracked_seconds_total,
+    let conn = db.0.lock().map_err(|_| "Couldn't load Today")?;
+    today_for(
+        &conn,
+        &chrono::Local::now().format("%Y-%m-%d").to_string(),
+        include_overdue,
+    )
+    .map_err(|e| {
+        eprintln!("Today: {e}");
+        "Couldn't load Today. Try again.".into()
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn db() -> Connection {
+        let c = crate::db::test_connection();
+        c.execute_batch("INSERT INTO classes(id,course_code,semester) VALUES(1,'LGST','Fall');")
+            .unwrap();
+        c
+    }
+    fn add(
+        c: &Connection,
+        id: i64,
+        parent: Option<i64>,
+        due: Option<&str>,
+        schedule: Option<&str>,
+    ) {
+        c.execute("INSERT INTO tasks(id,class_id,title,parent_task_id,due_at,scheduled_date) VALUES(?1,1,'Task',?2,?3,?4)",params![id,parent,due,schedule]).unwrap();
+    }
+    fn ids(c: &Connection) -> Vec<i64> {
+        today_for(c, "2026-09-15", true)
+            .unwrap()
+            .groups
+            .into_iter()
+            .flat_map(|g| g.tasks.into_iter().map(|t| t.task.id))
+            .collect()
+    }
+    #[test]
+    fn parent_due_includes_undated_child() {
+        let c = db();
+        add(&c, 1, None, Some("2026-09-15"), None);
+        add(&c, 2, Some(1), None, None);
+        assert_eq!(ids(&c), vec![1, 2]);
+    }
+    #[test]
+    fn child_due_includes_context_without_siblings() {
+        let c = db();
+        add(&c, 1, None, Some("2026-10-01"), None);
+        add(&c, 2, Some(1), Some("2026-09-15"), None);
+        add(&c, 3, Some(1), None, None);
+        assert_eq!(ids(&c), vec![1, 2]);
+        assert_eq!(today_for(&c, "2026-09-15", true).unwrap().task_count, 1);
+    }
+    #[test]
+    fn deep_tree() {
+        let c = db();
+        add(&c, 1, None, None, None);
+        add(&c, 2, Some(1), None, None);
+        add(&c, 3, Some(2), None, Some("2026-09-15"));
+        add(&c, 4, Some(3), None, None);
+        assert_eq!(ids(&c), vec![1, 2, 3, 4]);
+    }
+    #[test]
+    fn overdue() {
+        let c = db();
+        add(&c, 1, None, Some("2026-09-01"), None);
+        assert_eq!(ids(&c), vec![1]);
+        assert!(today_for(&c, "2026-09-15", false)
+            .unwrap()
+            .groups
+            .is_empty());
+    }
+    #[test]
+    fn scheduled_today() {
+        let c = db();
+        add(&c, 1, None, Some("2026-10-01"), Some("2026-09-15"));
+        assert_eq!(ids(&c), vec![1]);
+    }
+    #[test]
+    fn future_not_scheduled() {
+        let c = db();
+        add(&c, 1, None, Some("2026-10-01"), None);
+        assert!(ids(&c).is_empty());
+    }
+    #[test]
+    fn archived_hidden() {
+        let c = db();
+        add(&c, 1, None, None, Some("2026-09-15"));
+        c.execute("UPDATE classes SET active=0", []).unwrap();
+        assert!(ids(&c).is_empty());
+    }
+    #[test]
+    fn completed_hidden() {
+        let c = db();
+        add(&c, 1, None, None, Some("2026-09-15"));
+        c.execute("UPDATE tasks SET status='completed'", [])
+            .unwrap();
+        assert!(ids(&c).is_empty());
+    }
+    #[test]
+    fn completed_ancestor_keeps_incomplete_child_visible() {
+        let c = db();
+        add(&c, 1, None, None, None);
+        add(&c, 2, Some(1), None, Some("2026-09-15"));
+        c.execute("UPDATE tasks SET status='completed' WHERE id=1", [])
+            .unwrap();
+        assert_eq!(ids(&c), vec![1, 2]);
+    }
+    #[test]
+    fn today_total_counts_each_session_once_including_completed_work() {
+        let c = db();
+        add(&c, 1, None, Some("2026-09-15"), None);
+        add(&c, 2, Some(1), None, None);
+        c.execute_batch("INSERT INTO time_sessions(task_id,start_ts,end_ts,final_duration_seconds) VALUES(1,datetime('2026-09-15 12:00','utc'),datetime('2026-09-15 12:30','utc'),1800),(2,datetime('2026-09-15 13:00','utc'),datetime('2026-09-15 13:40','utc'),2400)").unwrap();
+        let summary = today_for(&c, "2026-09-15", true).unwrap();
+        assert_eq!(summary.tracked_seconds_total, 4200);
+        assert_eq!(summary.groups[0].tasks[0].task.tracked_seconds, 4200);
+        c.execute("UPDATE tasks SET status='completed'", [])
+            .unwrap();
+        assert_eq!(
+            today_for(&c, "2026-09-15", true)
+                .unwrap()
+                .tracked_seconds_total,
+            4200
+        );
+    }
 }

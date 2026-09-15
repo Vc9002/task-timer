@@ -112,3 +112,12 @@ The UI ticks only while a timer is running. Focus/visibility refreshes read the
 persisted timestamps; no timer writes happen every second. Starting another
 task offers **Finish Current & Start New**, applied atomically. An unfinished
 session at startup offers Continue, Finish Now, Edit (duration), or Discard.
+
+## Planning Today
+
+Use a task's **•••** menu to schedule Today, Tomorrow, or a date. Clearing a
+schedule does not hide a task that is still due/overdue. Today includes useful
+incomplete descendants and ancestor context at any depth, only in active
+classes. Local tasks can be completed directly; complete Todoist tasks in
+Todoist, then sync. Row time includes descendants; the header is finished time
+tracked today, counted once per session, including work already completed.
