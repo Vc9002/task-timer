@@ -2,13 +2,27 @@
   import { onMount } from "svelte";
   import { page } from "$app/stores";
   import { timerStore } from "$lib/stores/timer.svelte";
+  import Modal from "$lib/components/Modal.svelte";
   import { formatHms } from "$lib/format";
 
   let { children } = $props();
 
   onMount(() => {
-    timerStore.refresh();
+    timerStore.mount();
+    const refresh = () => { if (document.visibilityState === "visible") void timerStore.refresh(); };
+    window.addEventListener("focus", refresh);
+    window.addEventListener("pageshow", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      timerStore.destroy();
+      window.removeEventListener("focus", refresh);
+      window.removeEventListener("pageshow", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
   });
+
+  let editingRecovery = $state(false);
+  let recoveryMinutes = $state<number | undefined>(0);
 
   const links = [
     { href: "/", label: "Today" },
@@ -32,7 +46,34 @@
   }
 </script>
 
+{#if timerStore.conflict}
+  <Modal title="Switch timer?" onclose={() => { if (!timerStore.busy) timerStore.conflict = null; }}>
+    <p>You're currently tracking {timerStore.conflict.classCode} — {timerStore.conflict.taskTitle}</p>
+    <p>{formatHms(timerStore.displaySeconds)}</p>
+    <p>You tried to start: {timerStore.conflict.requestedTitle}</p>
+    <button disabled={timerStore.busy} onclick={() => timerStore.switchToRequested()}>Finish Current &amp; Start New</button>
+    <button disabled={timerStore.busy} onclick={() => timerStore.conflict = null}>Keep Current</button>
+    {#if timerStore.error}<p role="alert">{timerStore.error}</p>{/if}
+  </Modal>
+{:else if timerStore.recovery && timerStore.active}
+  <Modal title="Unfinished timer found" onclose={() => timerStore.recovery = false}>
+    <p>{timerStore.active.class_course_code} — {timerStore.active.task_title}</p>
+    <p>Started: {new Date(timerStore.active.session.start_ts.replace(" ", "T") + "Z").toLocaleString()}</p>
+    <p>Elapsed: {formatHms(timerStore.displaySeconds)} {timerStore.active.is_paused ? "(paused)" : ""}</p>
+    {#if editingRecovery}
+      <label>Tracked minutes <input type="number" min="0" step="0.1" bind:value={recoveryMinutes} /></label>
+      <button disabled={timerStore.busy || recoveryMinutes === undefined || recoveryMinutes < 0} onclick={() => timerStore.finishEdited(recoveryMinutes ?? 0)}>Save &amp; Finish</button>
+    {:else}
+      <button onclick={() => timerStore.recovery = false}>Continue</button>
+      <button disabled={timerStore.busy} onclick={() => timerStore.finish()}>Finish Now</button>
+      <button onclick={() => { recoveryMinutes = Math.round(timerStore.displaySeconds / 6) / 10; editingRecovery = true; }}>Edit</button>
+      <button disabled={timerStore.busy} onclick={() => timerStore.cancel()}>Discard</button>
+    {/if}
+    {#if timerStore.error}<p role="alert">{timerStore.error}</p>{/if}
+  </Modal>
+{/if}
 <div class="shell">
+  {#if timerStore.error}<p role="alert">{timerStore.error} <button onclick={() => timerStore.refresh()}>Refresh timer</button></p>{/if}
   <nav>
     {#each links as link}
       <a href={link.href} class:active={$page.url.pathname === link.href}>{link.label}</a>
@@ -50,8 +91,8 @@
         {timerStore.active.class_course_code} — {timerStore.active.task_title}
       </span>
       <span class="clock">{formatHms(timerStore.displaySeconds)}</span>
-      <button onclick={togglePause}>{timerStore.active.is_paused ? "Resume" : "Pause"}</button>
-      <button onclick={finish} class="finish">Finish</button>
+      <button disabled={timerStore.busy} onclick={togglePause}>{timerStore.active.is_paused ? "Resume" : "Pause"}</button>
+      <button disabled={timerStore.busy} onclick={finish} class="finish">Finish</button>
     </div>
   {/if}
 </div>

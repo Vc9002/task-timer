@@ -16,12 +16,13 @@
     }
   }
 
-  async function start(taskId: number) {
-    const ok = await timerStore.start(taskId);
+  async function start(taskId: number, title: string) {
+    const ok = await timerStore.start(taskId, title);
     if (ok) await refresh();
   }
 
   onMount(refresh);
+  $effect(() => { void timerStore.revision; void refresh(); });
 
   const todayDate = new Date().toLocaleDateString(undefined, {
     weekday: "long",
@@ -47,16 +48,6 @@
       <span>Tracked: {formatDurationShort(today.tracked_seconds_total)}</span>
     </div>
 
-    {#if timerStore.conflict}
-      <div class="conflict">
-        You're currently tracking {timerStore.conflict.classCode} — {timerStore.conflict.taskTitle}.
-        <button onclick={async () => { await timerStore.finish(); timerStore.conflict = null; await refresh(); }}>
-          Stop & continue
-        </button>
-        <button onclick={() => (timerStore.conflict = null)}>Cancel</button>
-      </div>
-    {/if}
-
     {#each today.groups as group (group.class_id)}
       <section class="class-group">
         <h2>{group.course_code}</h2>
@@ -74,8 +65,8 @@
               {#if task.tracked_seconds > 0}
                 <span class="tracked">{formatDurationShort(task.tracked_seconds)}</span>
               {/if}
-              {#if !timerStore.active && task.status !== "completed"}
-                <button onclick={() => start(task.id)}>Start</button>
+              {#if timerStore.active?.session.task_id !== task.id && task.status !== "completed"}
+                <button onclick={() => start(task.id, `${group.course_code} — ${task.title}`)}>Start</button>
               {/if}
             </li>
             {#each group.tasks.filter((t) => t.parent_task_id === task.id) as sub (sub.id)}
@@ -85,8 +76,8 @@
                 {#if sub.tracked_seconds > 0}
                   <span class="tracked">{formatDurationShort(sub.tracked_seconds)}</span>
                 {/if}
-                {#if !timerStore.active && sub.status !== "completed"}
-                  <button onclick={() => start(sub.id)}>Start</button>
+                {#if timerStore.active?.session.task_id !== sub.id && sub.status !== "completed"}
+                  <button onclick={() => start(sub.id, `${group.course_code} — ${sub.title}`)}>Start</button>
                 {/if}
               </li>
             {/each}
@@ -129,17 +120,6 @@
     color: #666;
     margin-bottom: 1.5rem;
     font-size: 0.95em;
-  }
-
-  .conflict {
-    background: #fff4e0;
-    border: 1px solid #e0b060;
-    border-radius: 8px;
-    padding: 0.75rem 1rem;
-    margin-bottom: 1.5rem;
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
   }
 
   .class-group {

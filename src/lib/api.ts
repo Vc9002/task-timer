@@ -285,3 +285,10 @@ export function mapTodoistProject(todoistId: string, classId: number | null): Pr
 export function syncTodoistNow(): Promise<SyncResult> {
   return invoke("sync_todoist_now");
 }
+
+export function switchTimer(sessionId: number, taskId: number): Promise<ActiveSessionInfo> {
+  return invoke("switch_timer", { sessionId, taskId });
+}
+export function recoverTimer(sessionId: number, durationSeconds: number): Promise<Session> {
+  return invoke("recover_timer", { sessionId, durationSeconds });
+}

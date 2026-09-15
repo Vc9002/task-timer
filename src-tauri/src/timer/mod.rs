@@ -84,14 +84,14 @@ fn task_and_class_label(conn: &Connection, task_id: i64) -> rusqlite::Result<(St
 /// so app restarts, sleep, or a stalled UI tick can never desync the value.
 fn compute_elapsed_seconds(conn: &Connection, session: &Session) -> rusqlite::Result<i64> {
     let now_minus_start: i64 = conn.query_row(
-        "SELECT CAST((julianday('now') - julianday(?1)) * 86400 AS INTEGER)",
+        "SELECT MAX(0, unixepoch('now') - unixepoch(?1))",
         [&session.start_ts],
         |r| r.get(0),
     )?;
     let mut elapsed = now_minus_start - session.accumulated_pause_seconds;
     if let Some(pause_started) = &session.pause_started_ts {
         let ongoing_pause: i64 = conn.query_row(
-            "SELECT CAST((julianday('now') - julianday(?1)) * 86400 AS INTEGER)",
+            "SELECT MAX(0, unixepoch('now') - unixepoch(?1))",
             [pause_started],
             |r| r.get(0),
         )?;
@@ -173,7 +173,7 @@ pub fn core_resume_timer(conn: &Connection) -> Result<ActiveSessionInfo, TimerEr
     let session = find_active_session(conn)?.ok_or(TimerError::NotFound)?;
     if let Some(pause_started) = &session.pause_started_ts {
         let pause_elapsed: i64 = conn.query_row(
-            "SELECT CAST((julianday('now') - julianday(?1)) * 86400 AS INTEGER)",
+            "SELECT MAX(0, unixepoch('now') - unixepoch(?1))",
             [pause_started],
             |r| r.get(0),
         )?;
@@ -197,7 +197,7 @@ pub fn core_finish_timer(conn: &Connection) -> Result<Session, TimerError> {
     // Fold any in-progress pause into accumulated_pause_seconds before finalizing.
     if let Some(pause_started) = &session.pause_started_ts {
         let pause_elapsed: i64 = conn.query_row(
-            "SELECT CAST((julianday('now') - julianday(?1)) * 86400 AS INTEGER)",
+            "SELECT MAX(0, unixepoch('now') - unixepoch(?1))",
             [pause_started],
             |r| r.get(0),
         )?;
@@ -210,8 +210,7 @@ pub fn core_finish_timer(conn: &Connection) -> Result<Session, TimerError> {
 
     conn.execute(
         "UPDATE time_sessions SET end_ts = datetime('now'),
-         final_duration_seconds = CAST((julianday('now') - julianday(start_ts)) * 86400 AS INTEGER)
-             - accumulated_pause_seconds
+         final_duration_seconds = MAX(0, unixepoch('now') - unixepoch(start_ts) - accumulated_pause_seconds)
          WHERE id = ?1",
         [session.id],
     )?;
@@ -238,6 +237,16 @@ pub fn core_edit_session_duration(
     if final_duration_seconds < 0 {
         return Err("duration cannot be negative".into());
     }
+    let ended: bool = conn
+        .query_row(
+            "SELECT end_ts IS NOT NULL FROM time_sessions WHERE id=?1",
+            [session_id],
+            |r| r.get(0),
+        )
+        .map_err(|_| "Session not found")?;
+    if !ended {
+        return Err("Finish the session before editing its duration".into());
+    }
     conn.execute(
         "UPDATE time_sessions SET final_duration_seconds = ?1, edited = 1 WHERE id = ?2",
         rusqlite::params![final_duration_seconds, session_id],
@@ -249,6 +258,54 @@ pub fn core_edit_session_duration(
         row_to_session,
     )
     .map_err(|e| e.to_string())
+}
+
+pub fn core_switch_timer(
+    conn: &Connection,
+    session_id: i64,
+    task_id: i64,
+) -> Result<ActiveSessionInfo, TimerError> {
+    let tx = conn.unchecked_transaction()?;
+    if find_active_session(&tx)?.map(|s| s.id) != Some(session_id) {
+        return Err(TimerError::NotFound);
+    }
+    core_finish_timer(&tx)?;
+    let next = core_start_timer(&tx, task_id)?;
+    tx.commit()?;
+    Ok(next)
+}
+
+#[tauri::command]
+pub fn switch_timer(
+    db: State<Db>,
+    session_id: i64,
+    task_id: i64,
+) -> Result<ActiveSessionInfo, TimerError> {
+    let conn = db.0.lock().map_err(lock_err)?;
+    core_switch_timer(&conn, session_id, task_id)
+}
+
+#[tauri::command]
+pub fn recover_timer(
+    db: State<Db>,
+    session_id: i64,
+    duration_seconds: i64,
+) -> Result<Session, String> {
+    let conn = db.0.lock().map_err(|_| "Couldn't access the timer")?;
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|_| "Couldn't save the timer")?;
+    if find_active_session(&tx)
+        .map_err(|_| "Couldn't load the timer")?
+        .map(|s| s.id)
+        != Some(session_id)
+    {
+        return Err("The active session has changed. Refresh and try again.".into());
+    }
+    core_finish_timer(&tx).map_err(|_| "Couldn't finish the timer")?;
+    let result = core_edit_session_duration(&tx, session_id, duration_seconds)?;
+    tx.commit().map_err(|_| "Couldn't save the timer")?;
+    Ok(result)
 }
 
 // ---------------------------------------------------------------------------
@@ -331,22 +388,7 @@ mod tests {
     use std::time::Duration;
 
     fn test_conn() -> Connection {
-        let dir = tempfile_dir();
-        db::open(&dir).expect("open test db")
-    }
-
-    fn tempfile_dir() -> std::path::PathBuf {
-        // Nanosecond timestamps alone can collide: cargo runs tests as parallel
-        // threads of the *same* process, so std::process::id() is identical
-        // across them, and clock resolution isn't always fine enough to keep
-        // near-simultaneous threads apart. A monotonically increasing counter
-        // guarantees uniqueness regardless of timing or thread scheduling.
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static COUNTER: AtomicU64 = AtomicU64::new(0);
-        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let mut dir = std::env::temp_dir();
-        dir.push(format!("task-timer-test-{}-{}", std::process::id(), n));
-        dir
+        db::test_connection()
     }
 
     fn seed_task(conn: &Connection) -> i64 {
@@ -542,5 +584,61 @@ mod tests {
             "expected ~{expected}s, got {}s",
             active.elapsed_seconds
         );
+    }
+    #[test]
+    fn database_rejects_second_active_session_without_app_checks() {
+        let conn = test_conn();
+        let id = seed_task(&conn);
+        conn.execute(
+            "INSERT INTO time_sessions(task_id,start_ts) VALUES(?1,datetime('now'))",
+            [id],
+        )
+        .unwrap();
+        assert!(conn
+            .execute(
+                "INSERT INTO time_sessions(task_id,start_ts) VALUES(?1,datetime('now'))",
+                [id]
+            )
+            .is_err());
+    }
+    #[test]
+    fn switching_is_atomic_and_preserves_requested_task() {
+        let conn = test_conn();
+        let a = seed_task(&conn);
+        let b = seed_task(&conn);
+        let first = core_start_timer(&conn, a).unwrap();
+        assert!(core_switch_timer(&conn, first.session.id, 999999).is_err());
+        assert_eq!(
+            core_get_active_session(&conn).unwrap().unwrap().session.id,
+            first.session.id
+        );
+        let next = core_switch_timer(&conn, first.session.id, b).unwrap();
+        assert_eq!(next.session.task_id, b);
+        assert!(core_switch_timer(&conn, first.session.id, a).is_err());
+    }
+    #[test]
+    fn sleep_gap_and_paused_gap_are_timestamp_derived() {
+        let conn = test_conn();
+        let id = seed_task(&conn);
+        core_start_timer(&conn, id).unwrap();
+        conn.execute_batch("UPDATE time_sessions SET start_ts=datetime('now','-7200 seconds'), pause_started_ts=datetime('now','-3600 seconds'), accumulated_pause_seconds=600").unwrap();
+        assert_eq!(
+            core_get_active_session(&conn)
+                .unwrap()
+                .unwrap()
+                .elapsed_seconds,
+            3000
+        );
+        assert_eq!(
+            core_finish_timer(&conn).unwrap().final_duration_seconds,
+            Some(3000)
+        );
+    }
+    #[test]
+    fn cannot_edit_a_running_session() {
+        let conn = test_conn();
+        let id = seed_task(&conn);
+        let active = core_start_timer(&conn, id).unwrap();
+        assert!(core_edit_session_duration(&conn, active.session.id, 60).is_err());
     }
 }

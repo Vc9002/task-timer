@@ -105,3 +105,10 @@ unmapped projects are skipped).
 cargo clippy --all-targets
 cargo fmt --check
 ```
+
+## Timer recovery
+
+The UI ticks only while a timer is running. Focus/visibility refreshes read the
+persisted timestamps; no timer writes happen every second. Starting another
+task offers **Finish Current & Start New**, applied atomically. An unfinished
+session at startup offers Continue, Finish Now, Edit (duration), or Discard.

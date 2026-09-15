@@ -20,7 +20,7 @@ use std::sync::Mutex;
 use tauri::Manager;
 use timer::{
     cancel_timer, edit_session_duration, finish_timer, get_active_session, list_sessions_for_task,
-    pause_timer, resume_timer, start_timer,
+    pause_timer, recover_timer, resume_timer, start_timer, switch_timer,
 };
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -63,6 +63,8 @@ pub fn run() {
             get_today,
             get_active_session,
             start_timer,
+            switch_timer,
+            recover_timer,
             pause_timer,
             resume_timer,
             finish_timer,
