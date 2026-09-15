@@ -5,10 +5,7 @@ use std::sync::Mutex;
 pub struct Db(pub Mutex<Connection>);
 
 /// Migrations in order. Each one runs exactly once, tracked in `schema_migrations`.
-const MIGRATIONS: &[(&str, &str)] = &[(
-    "0001_init",
-    include_str!("migrations/0001_init.sql"),
-)];
+const MIGRATIONS: &[(&str, &str)] = &[("0001_init", include_str!("migrations/0001_init.sql"))];
 
 pub fn open(app_data_dir: &Path) -> rusqlite::Result<Connection> {
     std::fs::create_dir_all(app_data_dir).expect("failed to create app data dir");
@@ -44,10 +41,7 @@ fn run_migrations(conn: &Connection) -> rusqlite::Result<()> {
         }
 
         conn.execute_batch(sql)?;
-        conn.execute(
-            "INSERT INTO schema_migrations (name) VALUES (?1)",
-            [name],
-        )?;
+        conn.execute("INSERT INTO schema_migrations (name) VALUES (?1)", [name])?;
     }
 
     Ok(())
