@@ -1,156 +1,181 @@
 <script lang="ts">
-  import { invoke } from "@tauri-apps/api/core";
+  import { onMount } from "svelte";
+  import {
+    listClasses,
+    createClass,
+    archiveClass,
+    type ClassRecord,
+  } from "$lib/api";
 
+  let classes = $state<ClassRecord[]>([]);
+  let courseCode = $state("");
   let name = $state("");
-  let greetMsg = $state("");
+  let semester = $state("");
+  let error = $state("");
 
-  async function greet(event: Event) {
-    event.preventDefault();
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    greetMsg = await invoke("greet", { name });
+  async function refresh() {
+    try {
+      classes = await listClasses();
+      error = "";
+    } catch (e) {
+      error = String(e);
+    }
   }
+
+  async function addClass(event: Event) {
+    event.preventDefault();
+    if (!courseCode.trim() || !semester.trim()) return;
+    try {
+      await createClass({
+        course_code: courseCode.trim(),
+        name: name.trim() || null,
+        semester: semester.trim(),
+        color: null,
+      });
+      courseCode = "";
+      name = "";
+      await refresh();
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
+  async function remove(id: number) {
+    try {
+      await archiveClass(id);
+      await refresh();
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
+  onMount(refresh);
 </script>
 
 <main class="container">
-  <h1>Welcome to Tauri + Svelte</h1>
+  <h1>Classes</h1>
 
-  <div class="row">
-    <a href="https://vite.dev" target="_blank">
-      <img src="/vite.svg" class="logo vite" alt="Vite Logo" />
-    </a>
-    <a href="https://tauri.app" target="_blank">
-      <img src="/tauri.svg" class="logo tauri" alt="Tauri Logo" />
-    </a>
-    <a href="https://svelte.dev" target="_blank">
-      <img src="/svelte.svg" class="logo svelte-kit" alt="SvelteKit Logo" />
-    </a>
-  </div>
-  <p>Click on the Tauri, Vite, and SvelteKit logos to learn more.</p>
+  {#if error}
+    <p class="error">{error}</p>
+  {/if}
 
-  <form class="row" onsubmit={greet}>
-    <input id="greet-input" placeholder="Enter a name..." bind:value={name} />
-    <button type="submit">Greet</button>
+  <form class="row" onsubmit={addClass}>
+    <input placeholder="Course code (e.g. LGST 1000)" bind:value={courseCode} />
+    <input placeholder="Full name (optional)" bind:value={name} />
+    <input placeholder="Semester (e.g. Fall 2026)" bind:value={semester} />
+    <button type="submit">Add class</button>
   </form>
-  <p>{greetMsg}</p>
+
+  <ul class="class-list">
+    {#each classes as c (c.id)}
+      <li>
+        <span class="code">{c.course_code}</span>
+        {#if c.name}<span class="name">{c.name}</span>{/if}
+        <span class="semester">{c.semester}</span>
+        <button onclick={() => remove(c.id)}>Archive</button>
+      </li>
+    {/each}
+    {#if classes.length === 0}
+      <li class="empty">No classes yet — add one above.</li>
+    {/if}
+  </ul>
 </main>
 
 <style>
-.logo.vite:hover {
-  filter: drop-shadow(0 0 2em #747bff);
-}
-
-.logo.svelte-kit:hover {
-  filter: drop-shadow(0 0 2em #ff3e00);
-}
-
-:root {
-  font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
-  font-size: 16px;
-  line-height: 24px;
-  font-weight: 400;
-
-  color: #0f0f0f;
-  background-color: #f6f6f6;
-
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  -webkit-text-size-adjust: 100%;
-}
-
-.container {
-  margin: 0;
-  padding-top: 10vh;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  text-align: center;
-}
-
-.logo {
-  height: 6em;
-  padding: 1.5em;
-  will-change: filter;
-  transition: 0.75s;
-}
-
-.logo.tauri:hover {
-  filter: drop-shadow(0 0 2em #24c8db);
-}
-
-.row {
-  display: flex;
-  justify-content: center;
-}
-
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
-
-a:hover {
-  color: #535bf2;
-}
-
-h1 {
-  text-align: center;
-}
-
-input,
-button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  color: #0f0f0f;
-  background-color: #ffffff;
-  transition: border-color 0.25s;
-  box-shadow: 0 2px 2px rgba(0, 0, 0, 0.2);
-}
-
-button {
-  cursor: pointer;
-}
-
-button:hover {
-  border-color: #396cd8;
-}
-button:active {
-  border-color: #396cd8;
-  background-color: #e8e8e8;
-}
-
-input,
-button {
-  outline: none;
-}
-
-#greet-input {
-  margin-right: 5px;
-}
-
-@media (prefers-color-scheme: dark) {
   :root {
-    color: #f6f6f6;
-    background-color: #2f2f2f;
+    font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
+    color: #0f0f0f;
+    background-color: #f6f6f6;
   }
 
-  a:hover {
-    color: #24c8db;
+  .container {
+    margin: 0 auto;
+    max-width: 640px;
+    padding: 3rem 1.5rem;
   }
 
-  input,
+  h1 {
+    margin-bottom: 1.5rem;
+  }
+
+  .row {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1.5rem;
+  }
+
+  input {
+    flex: 1;
+    padding: 0.5em 0.75em;
+    border-radius: 6px;
+    border: 1px solid #ccc;
+  }
+
   button {
-    color: #ffffff;
-    background-color: #0f0f0f98;
+    padding: 0.5em 1em;
+    border-radius: 6px;
+    border: 1px solid transparent;
+    background: #396cd8;
+    color: white;
+    cursor: pointer;
   }
-  button:active {
-    background-color: #0f0f0f69;
-  }
-}
 
+  .class-list {
+    list-style: none;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .class-list li {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.6em 0.9em;
+    background: white;
+    border-radius: 6px;
+    border: 1px solid #e5e5e5;
+  }
+
+  .class-list li button {
+    margin-left: auto;
+    background: #e5e5e5;
+    color: #333;
+  }
+
+  .code {
+    font-weight: 600;
+  }
+
+  .semester {
+    color: #666;
+    font-size: 0.9em;
+  }
+
+  .empty {
+    color: #888;
+    font-style: italic;
+    border-style: dashed;
+  }
+
+  .error {
+    color: #b00020;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color: #f6f6f6;
+      background-color: #2f2f2f;
+    }
+    .class-list li {
+      background: #3a3a3a;
+      border-color: #4a4a4a;
+    }
+    input {
+      background: #2a2a2a;
+      color: #f6f6f6;
+      border-color: #555;
+    }
+  }
 </style>
