@@ -3,7 +3,7 @@ use crate::todoist;
 use crate::todoist::client::TodoistClient;
 use crate::todoist::sync::SyncResult;
 use serde::Serialize;
-use tauri::State;
+use tauri::{Manager, State};
 
 #[derive(Debug, Serialize)]
 pub struct TodoistStatus {
@@ -24,9 +24,11 @@ pub fn get_todoist_status(db: State<Db>) -> Result<TodoistStatus, String> {
     let connected = todoist::get_token()?.is_some();
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     let last_synced_at: Option<String> = conn
-        .query_row("SELECT MAX(synced_at) FROM todoist_projects", [], |r| {
-            r.get(0)
-        })
+        .query_row(
+            "SELECT value FROM sync_metadata WHERE key='todoist_last_sync'",
+            [],
+            |r| r.get(0),
+        )
         .unwrap_or(None);
     Ok(TodoistStatus {
         connected,
@@ -35,20 +37,38 @@ pub fn get_todoist_status(db: State<Db>) -> Result<TodoistStatus, String> {
 }
 
 #[tauri::command]
-pub fn set_todoist_token(token: String) -> Result<(), String> {
-    let trimmed = token.trim();
-    if trimmed.is_empty() {
-        return Err("Token cannot be empty".into());
-    }
-    // Validate before persisting so a typo doesn't get saved as "connected".
-    let client = TodoistClient::new(trimmed.to_string());
-    client.test_connection().map_err(|e| e.to_string())?;
-    todoist::set_token(trimmed)
+pub async fn set_todoist_token(app: tauri::AppHandle, token: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let _gate = todoist::sync::gate()?;
+        let trimmed = token.trim();
+        if trimmed.is_empty() {
+            return Err("Token cannot be empty".into());
+        }
+        TodoistClient::new(trimmed.to_string())
+            .map_err(|e| e.to_string())?
+            .test_connection()
+            .map_err(|e| e.to_string())?;
+        // Reset cursor before changing account; a failed keychain write merely causes a full sync.
+        let db = app.state::<Db>();
+        let conn =
+            db.0.lock()
+                .map_err(|_| "Couldn't access local Todoist settings")?;
+        conn.execute("DELETE FROM sync_metadata WHERE key='todoist_cursor'", [])
+            .map_err(|_| "Couldn't reset Todoist sync")?;
+        todoist::set_token(trimmed)
+    })
+    .await
+    .map_err(|_| "Couldn't connect Todoist. Try again.".to_string())?
 }
 
 #[tauri::command]
-pub fn disconnect_todoist() -> Result<(), String> {
-    todoist::clear_token()
+pub async fn disconnect_todoist() -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let _gate = todoist::sync::gate()?;
+        todoist::clear_token()
+    })
+    .await
+    .map_err(|_| "Couldn't disconnect Todoist. Try again.".to_string())?
 }
 
 #[tauri::command]
@@ -73,24 +93,21 @@ pub fn list_todoist_project_mappings(db: State<Db>) -> Result<Vec<TodoistProject
 }
 
 #[tauri::command]
-pub fn map_todoist_project(db: State<Db>, todoist_id: String, class_id: i64) -> Result<(), String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
-    conn.execute(
-        "UPDATE todoist_projects SET class_id = ?1 WHERE todoist_id = ?2",
-        rusqlite::params![class_id, todoist_id],
-    )
-    .map_err(|e| e.to_string())?;
-    conn.execute(
-        "UPDATE classes SET todoist_project_id = ?1 WHERE id = ?2",
-        rusqlite::params![todoist_id, class_id],
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(())
+pub fn map_todoist_project(
+    db: State<Db>,
+    todoist_id: String,
+    class_id: Option<i64>,
+) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|_| "Couldn't access local tasks")?;
+    todoist::sync::map_project(&conn, &todoist_id, class_id)
+        .map_err(|_| "Couldn't save the project mapping. Try again.".into())
 }
 
 #[tauri::command]
-pub fn sync_todoist_now(db: State<Db>) -> Result<SyncResult, String> {
-    let token = todoist::get_token()?.ok_or("No Todoist token configured".to_string())?;
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
-    todoist::sync::sync_now(&conn, &token).map_err(|e| e.to_string())
+pub async fn sync_todoist_now(app: tauri::AppHandle) -> Result<SyncResult, String> {
+    tauri::async_runtime::spawn_blocking(move || todoist::sync::sync_now(&app.state::<Db>()))
+        .await
+        .map_err(|_| {
+            "Todoist sync couldn't finish. Your local tasks and timer still work.".to_string()
+        })?
 }

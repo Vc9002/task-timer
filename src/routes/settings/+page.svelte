@@ -76,7 +76,6 @@
 
   async function updateMapping(todoistId: string, classIdStr: string) {
     const classId = classIdStr ? Number(classIdStr) : null;
-    if (classId === null) return;
     try {
       await mapTodoistProject(todoistId, classId);
       await refresh();

@@ -9,7 +9,6 @@ export interface ClassRecord {
   semester: string;
   color: string | null;
   active: boolean;
-  todoist_project_id: string | null;
 }
 
 export interface NewClass {
@@ -279,7 +278,7 @@ export function listTodoistProjectMappings(): Promise<TodoistProjectMapping[]> {
   return invoke("list_todoist_project_mappings");
 }
 
-export function mapTodoistProject(todoistId: string, classId: number): Promise<void> {
+export function mapTodoistProject(todoistId: string, classId: number | null): Promise<void> {
   return invoke("map_todoist_project", { todoistId, classId });
 }
 

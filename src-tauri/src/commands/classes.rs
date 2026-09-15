@@ -10,7 +10,6 @@ pub struct Class {
     pub semester: String,
     pub color: Option<String>,
     pub active: bool,
-    pub todoist_project_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -39,7 +38,6 @@ fn row_to_class(row: &rusqlite::Row) -> rusqlite::Result<Class> {
         semester: row.get("semester")?,
         color: row.get("color")?,
         active: row.get::<_, i64>("active")? != 0,
-        todoist_project_id: row.get("todoist_project_id")?,
     })
 }
 

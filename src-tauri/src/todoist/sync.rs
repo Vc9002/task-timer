@@ -1,6 +1,21 @@
-use super::client::{TodoistApiError, TodoistClient, TodoistTask};
-use rusqlite::Connection;
+use super::client::{RemoteSync, TodoistClient, TodoistTask};
+use crate::db::Db;
+use rusqlite::{Connection, OptionalExtension};
 use serde::Serialize;
+use std::collections::{HashMap, HashSet};
+use std::sync::{Mutex, MutexGuard};
+
+// Serializes sync and credential changes, independently of the SQLite mutex.
+static SYNC_GATE: Mutex<()> = Mutex::new(());
+pub fn gate() -> Result<MutexGuard<'static, ()>, String> {
+    SYNC_GATE
+        .try_lock()
+        .map_err(|_| "Todoist sync is already running. Try again when it finishes.".into())
+}
+fn database_error(error: impl std::fmt::Display) -> String {
+    eprintln!("Todoist local apply failed: {error}");
+    "TaskTimer couldn't save the Todoist sync. No partial changes were saved. Try again.".into()
+}
 
 #[derive(Debug, Serialize)]
 pub struct SyncResult {
@@ -8,221 +23,366 @@ pub struct SyncResult {
     pub tasks_synced: usize,
 }
 
-/// Read-only sync (Phase 1 of Todoist integration): pulls projects and tasks,
-/// upserts by (source='todoist', external_id) so re-running never duplicates.
-pub fn sync_now(conn: &Connection, token: &str) -> Result<SyncResult, TodoistApiError> {
-    let client = TodoistClient::new(token.to_string());
-
-    let projects = client.fetch_all_projects()?;
-    for project in &projects {
-        conn.execute(
-            "INSERT INTO todoist_projects (todoist_id, name, synced_at)
-             VALUES (?1, ?2, datetime('now'))
-             ON CONFLICT(todoist_id) DO UPDATE SET name = excluded.name, synced_at = excluded.synced_at",
-            rusqlite::params![project.id, project.name],
-        )
-        .map_err(|e| TodoistApiError::Network(e.to_string()))?;
-    }
-
-    let tasks = client.fetch_all_tasks()?;
-
-    // Parents must be upserted before children so parent_task_id can resolve.
-    let mut ordered: Vec<&TodoistTask> = tasks.iter().collect();
-    ordered.sort_by_key(|t| t.parent_id.is_some());
-
-    let mut synced = 0usize;
-    for task in ordered {
-        if upsert_task(conn, task).is_ok() {
-            synced += 1;
+pub fn sync_now(db: &Db) -> Result<SyncResult, String> {
+    let _gate = gate()?;
+    let token = super::get_token()?.ok_or("No Todoist token configured")?;
+    sync_with(db, |cursor| {
+        let client = TodoistClient::new(token).map_err(|e| e.to_string())?;
+        let first = client.fetch(cursor).map_err(|e| e.to_string())?;
+        if first.full_sync {
+            // Full snapshots may be cached by Todoist; catch up before applying.
+            let next = client.fetch(&first.sync_token).map_err(|e| e.to_string())?;
+            Ok(vec![first, next])
+        } else {
+            Ok(vec![first])
         }
-    }
-
-    Ok(SyncResult {
-        projects_synced: projects.len(),
-        tasks_synced: synced,
     })
 }
 
-pub(crate) fn upsert_task(conn: &Connection, task: &TodoistTask) -> rusqlite::Result<()> {
-    let class_id: Option<i64> = conn
-        .query_row(
-            "SELECT class_id FROM todoist_projects WHERE todoist_id = ?1",
-            [&task.project_id],
-            |r| r.get(0),
+fn sync_with(
+    db: &Db,
+    fetch: impl FnOnce(&str) -> Result<Vec<RemoteSync>, String>,
+) -> Result<SyncResult, String> {
+    let cursor = {
+        let conn = db.0.lock().map_err(database_error)?;
+        conn.query_row(
+            "SELECT value FROM sync_metadata WHERE key='todoist_cursor'",
+            [],
+            |r| r.get::<_, String>(0),
         )
-        .ok()
-        .flatten();
-    let Some(class_id) = class_id else {
-        // Project not mapped to a class yet — skip until the user maps it.
-        return Ok(());
-    };
+        .optional()
+        .map_err(database_error)?
+        .unwrap_or_else(|| "*".into())
+    }; // No DB guard crosses the network boundary.
+    let snapshots = fetch(&cursor)?;
+    let conn = db.0.lock().map_err(database_error)?;
+    apply(&conn, &snapshots).map_err(database_error)
+}
 
-    let parent_task_id: Option<i64> = match &task.parent_id {
-        Some(pid) => conn
+pub(crate) fn apply(conn: &Connection, snapshots: &[RemoteSync]) -> rusqlite::Result<SyncResult> {
+    let tx = conn.unchecked_transaction()?;
+    let mut projects_synced = 0;
+    for snapshot in snapshots {
+        if snapshot.full_sync {
+            tx.execute("DELETE FROM todoist_task_cache", [])?;
+            // Absence is NOT proof of completion/deletion. Keep history and hide unknown work.
+            tx.execute("UPDATE tasks SET external_state='unknown' WHERE source='todoist' AND external_state='active'", [])?;
+        }
+        for project in &snapshot.projects {
+            if project.is_deleted {
+                tx.execute(
+                    "UPDATE todoist_projects SET class_id=NULL WHERE todoist_id=?1",
+                    [&project.id],
+                )?;
+            } else {
+                tx.execute("INSERT INTO todoist_projects(todoist_id,name,synced_at) VALUES(?1,?2,datetime('now')) ON CONFLICT(todoist_id) DO UPDATE SET name=excluded.name,synced_at=excluded.synced_at", rusqlite::params![project.id,project.name])?;
+                projects_synced += 1;
+            }
+        }
+        for task in &snapshot.items {
+            if task.is_deleted || task.checked {
+                let state = if task.is_deleted {
+                    "deleted"
+                } else {
+                    "completed"
+                };
+                tx.execute("UPDATE tasks SET external_state=?1, status=CASE WHEN ?1='completed' THEN 'completed' ELSE status END, completed_at=?2, updated_at=datetime('now') WHERE source='todoist' AND external_id=?3", rusqlite::params![state,task.completed_at,task.id])?;
+                tx.execute(
+                    "DELETE FROM todoist_task_cache WHERE todoist_id=?1",
+                    [&task.id],
+                )?;
+            } else {
+                if task.content.trim().is_empty() || task.project_id.is_empty() {
+                    return Err(rusqlite::Error::InvalidQuery);
+                }
+                let payload =
+                    serde_json::to_string(task).map_err(|_| rusqlite::Error::InvalidQuery)?;
+                tx.execute("INSERT INTO todoist_task_cache(todoist_id,payload) VALUES(?1,?2) ON CONFLICT(todoist_id) DO UPDATE SET payload=excluded.payload", rusqlite::params![task.id,payload])?;
+            }
+        }
+        tx.execute("INSERT INTO sync_metadata(key,value) VALUES('todoist_cursor',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [&snapshot.sync_token])?;
+    }
+    let tasks_synced = reconcile_cached(&tx)?;
+    tx.execute("INSERT INTO sync_metadata(key,value) VALUES('todoist_last_sync',datetime('now')) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [])?;
+    tx.commit()?;
+    Ok(SyncResult {
+        projects_synced,
+        tasks_synced,
+    })
+}
+
+pub(crate) fn reconcile_cached(conn: &Connection) -> rusqlite::Result<usize> {
+    let payloads = conn
+        .prepare("SELECT payload FROM todoist_task_cache")?
+        .query_map([], |r| r.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut tasks = HashMap::new();
+    for payload in payloads {
+        let task: TodoistTask =
+            serde_json::from_str(&payload).map_err(|_| rusqlite::Error::InvalidQuery)?;
+        tasks.insert(task.id.clone(), task);
+    }
+    // Clear old edges before moving projects/classes. Rebuild only after every row exists.
+    conn.execute(
+        "UPDATE tasks SET parent_task_id=NULL WHERE source='todoist' AND external_id IN (SELECT todoist_id FROM todoist_task_cache)",
+        [],
+    )?;
+    let mut imported = HashSet::new();
+    for task in tasks.values() {
+        let class_id: Option<i64> = conn
             .query_row(
-                "SELECT id FROM tasks WHERE source = 'todoist' AND external_id = ?1",
-                [pid],
+                "SELECT class_id FROM todoist_projects WHERE todoist_id=?1",
+                [&task.project_id],
                 |r| r.get(0),
             )
-            .ok(),
-        None => None,
-    };
+            .optional()?
+            .flatten();
+        let Some(class_id) = class_id else {
+            continue;
+        };
+        let due = task
+            .due
+            .as_ref()
+            .map(|d| d.datetime.as_ref().unwrap_or(&d.date));
+        conn.execute("INSERT INTO tasks(class_id,title,description,priority,due_at,source,external_id,todoist_project_id,external_state) VALUES(?1,?2,?3,?4,?5,'todoist',?6,?7,'active') ON CONFLICT(source,external_id) DO UPDATE SET class_id=excluded.class_id,title=excluded.title,description=excluded.description,priority=excluded.priority,due_at=excluded.due_at,todoist_project_id=excluded.todoist_project_id,external_state='active',status=CASE WHEN tasks.status='completed' THEN 'not_started' ELSE tasks.status END,completed_at=NULL,updated_at=datetime('now')", rusqlite::params![class_id,task.content,task.description,task.priority,due,task.id,task.project_id])?;
+        imported.insert(task.id.clone());
+    }
+    for id in &imported {
+        let task = &tasks[id];
+        if let Some(parent) = &task.parent_id {
+            // Reject malformed cycles rather than hanging recursive Today/analytics queries.
+            let mut seen = HashSet::from([id.as_str()]);
+            let mut ancestor = Some(parent.as_str());
+            while let Some(pid) = ancestor {
+                if !seen.insert(pid) {
+                    return Err(rusqlite::Error::InvalidQuery);
+                }
+                ancestor = tasks.get(pid).and_then(|t| t.parent_id.as_deref());
+            }
+            if imported.contains(parent) && tasks[parent].project_id == task.project_id {
+                conn.execute("UPDATE tasks SET parent_task_id=(SELECT id FROM tasks WHERE source='todoist' AND external_id=?1) WHERE source='todoist' AND external_id=?2", rusqlite::params![parent,id])?;
+            }
+        }
+    }
+    Ok(imported.len())
+}
 
-    let due_at = task
-        .due
-        .as_ref()
-        .map(|d| d.datetime.clone().unwrap_or_else(|| d.date.clone()));
-
-    conn.execute(
-        "INSERT INTO tasks (class_id, parent_task_id, title, description, priority, due_at,
-             source, external_id)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'todoist', ?7)
-         ON CONFLICT(source, external_id) DO UPDATE SET
-             class_id = excluded.class_id,
-             parent_task_id = excluded.parent_task_id,
-             title = excluded.title,
-             description = excluded.description,
-             priority = excluded.priority,
-             due_at = excluded.due_at,
-             updated_at = datetime('now')",
-        rusqlite::params![
-            class_id,
-            parent_task_id,
-            task.content,
-            task.description,
-            task.priority,
-            due_at,
-            task.id,
-        ],
-    )?;
-    Ok(())
+pub(crate) fn map_project(conn: &Connection, id: &str, class: Option<i64>) -> rusqlite::Result<()> {
+    let tx = conn.unchecked_transaction()?;
+    if tx.execute(
+        "UPDATE todoist_projects SET class_id=?1 WHERE todoist_id=?2",
+        rusqlite::params![class, id],
+    )? != 1
+    {
+        return Err(rusqlite::Error::QueryReturnedNoRows);
+    }
+    reconcile_cached(&tx)?;
+    tx.commit()
 }
 
 #[cfg(test)]
 mod tests {
-    use super::super::client::TodoistDue;
     use super::*;
-    use crate::db;
-
-    fn test_conn() -> Connection {
-        // A counter, not just a timestamp: parallel test threads share a pid
-        // and can share a nanosecond tick, so timestamp-only names can collide.
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static COUNTER: AtomicU64 = AtomicU64::new(0);
-        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let mut dir = std::env::temp_dir();
-        dir.push(format!("task-timer-sync-test-{}-{}", std::process::id(), n));
-        db::open(&dir).expect("open test db")
+    use crate::db::test_connection;
+    fn snapshot(items: serde_json::Value, full: bool) -> RemoteSync {
+        serde_json::from_value(serde_json::json!({"projects":[{"id":"p","name":"Course"}],"items":items,"sync_token":"next","full_sync":full})).unwrap()
     }
-
-    fn seed_mapped_class(conn: &Connection, todoist_project_id: &str) -> i64 {
-        conn.execute(
-            "INSERT INTO classes (course_code, semester, todoist_project_id)
-             VALUES ('TEST 1000', 'Fall 2026', ?1)",
-            [todoist_project_id],
+    fn task(id: &str, parent: Option<&str>) -> serde_json::Value {
+        serde_json::json!({"id":id,"project_id":"p","parent_id":parent,"content":id})
+    }
+    fn seed(conn: &Connection) {
+        conn.execute_batch("INSERT INTO classes(id,course_code,semester) VALUES(1,'LGST','Fall'),(2,'CRIM','Fall'); INSERT INTO todoist_projects(todoist_id,name,class_id) VALUES('p','Course',1);").unwrap();
+    }
+    #[test]
+    fn initial_sync_and_idempotent_deep_tree() {
+        let conn = test_connection();
+        seed(&conn);
+        for _ in 0..2 {
+            apply(
+                &conn,
+                &[snapshot(
+                    serde_json::json!([
+                        task("d", Some("c")),
+                        task("c", Some("b")),
+                        task("b", Some("a")),
+                        task("a", None)
+                    ]),
+                    true,
+                )],
+            )
+            .unwrap();
+        }
+        assert_eq!(
+            conn.query_row("SELECT count(*) FROM tasks", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            4
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT count(*) FROM tasks WHERE parent_task_id IS NOT NULL",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            3
+        );
+    }
+    #[test]
+    fn unmapped_then_mapped_then_moved_and_unmapped() {
+        let conn = test_connection();
+        seed(&conn);
+        map_project(&conn, "p", None).unwrap();
+        apply(
+            &conn,
+            &[snapshot(serde_json::json!([task("a", None)]), true)],
         )
         .unwrap();
-        let class_id = conn.last_insert_rowid();
-        conn.execute(
-            "INSERT INTO todoist_projects (todoist_id, name, class_id) VALUES (?1, 'Test Project', ?2)",
-            rusqlite::params![todoist_project_id, class_id],
+        assert_eq!(
+            conn.query_row("SELECT count(*) FROM tasks", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        map_project(&conn, "p", Some(1)).unwrap();
+        let id: i64 = conn
+            .query_row("SELECT id FROM tasks", [], |r| r.get(0))
+            .unwrap();
+        map_project(&conn, "p", Some(2)).unwrap();
+        assert_eq!(
+            conn.query_row("SELECT class_id FROM tasks WHERE id=?1", [id], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            2
+        );
+        map_project(&conn, "p", None).unwrap();
+        assert_eq!(
+            conn.query_row("SELECT class_id FROM todoist_projects", [], |r| r
+                .get::<_, Option<i64>>(0))
+                .unwrap(),
+            None
+        );
+    }
+    #[test]
+    fn rename_due_completion_deletion_preserve_history() {
+        let conn = test_connection();
+        seed(&conn);
+        apply(
+            &conn,
+            &[snapshot(
+                serde_json::json!([task("a", None), task("b", None)]),
+                true,
+            )],
         )
         .unwrap();
-        class_id
+        conn.execute_batch("INSERT INTO time_sessions(task_id,start_ts,end_ts,final_duration_seconds) SELECT id,'2026-09-15','2026-09-15',60 FROM tasks").unwrap();
+        let mut a = task("a", None);
+        a["content"] = "Renamed".into();
+        a["due"] = serde_json::json!({"date":"2026-09-20"});
+        apply(&conn, &[snapshot(serde_json::json!([a]), false)]).unwrap();
+        assert_eq!(
+            conn.query_row(
+                "SELECT title || due_at FROM tasks WHERE external_id='a'",
+                [],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+            "Renamed2026-09-20"
+        );
+        apply(
+            &conn,
+            &[snapshot(
+                serde_json::json!([{"id":"a","checked":true},{"id":"b","is_deleted":true}]),
+                false,
+            )],
+        )
+        .unwrap();
+        assert_eq!(
+            conn.query_row("SELECT status FROM tasks WHERE external_id='a'", [], |r| {
+                r.get::<_, String>(0)
+            })
+            .unwrap(),
+            "completed"
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT external_state FROM tasks WHERE external_id='b'",
+                [],
+                |r| r.get::<_, String>(0)
+            )
+            .unwrap(),
+            "deleted"
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT sum(final_duration_seconds) FROM time_sessions",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            120
+        );
     }
-
-    fn sample_task(id: &str, parent_id: Option<&str>) -> TodoistTask {
-        TodoistTask {
-            id: id.to_string(),
-            project_id: "proj1".to_string(),
-            parent_id: parent_id.map(|s| s.to_string()),
-            content: "Read Chapter 6".to_string(),
-            description: None,
-            due: Some(TodoistDue {
-                date: "2026-09-20".to_string(),
-                datetime: None,
-            }),
-            priority: Some(1),
+    #[test]
+    fn local_failure_rolls_back_everything_including_cursor() {
+        let conn = test_connection();
+        seed(&conn);
+        conn.execute_batch("CREATE TRIGGER fail_import BEFORE INSERT ON tasks BEGIN SELECT RAISE(ABORT,'injected'); END;").unwrap();
+        assert!(apply(
+            &conn,
+            &[snapshot(serde_json::json!([task("a", None)]), true)]
+        )
+        .is_err());
+        for table in ["tasks", "sync_metadata", "todoist_task_cache"] {
+            assert_eq!(
+                conn.query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r
+                    .get::<_, i64>(0))
+                    .unwrap(),
+                0
+            );
         }
     }
-
     #[test]
-    fn upsert_is_idempotent_running_sync_twice_does_not_duplicate() {
-        let conn = test_conn();
-        seed_mapped_class(&conn, "proj1");
-        let task = sample_task("todoist-1", None);
-
-        upsert_task(&conn, &task).unwrap();
-        upsert_task(&conn, &task).unwrap();
-
-        let count: i64 = conn
-            .query_row(
-                "SELECT COUNT(*) FROM tasks WHERE source = 'todoist' AND external_id = ?1",
-                ["todoist-1"],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(count, 1, "re-syncing the same task must not duplicate it");
+    fn network_failure_and_slow_fetch_leave_database_available() {
+        let db = Db(Mutex::new(test_connection()));
+        let result = sync_with(&db, |_| {
+            let conn = db.0.try_lock().expect("network must not hold DB");
+            seed(&conn);
+            conn.execute("INSERT INTO tasks(class_id,title) VALUES(1,'Local')", [])
+                .unwrap();
+            let id = conn.last_insert_rowid();
+            crate::timer::core_start_timer(&conn, id).unwrap();
+            crate::timer::core_finish_timer(&conn).unwrap();
+            Err("offline".into())
+        });
+        assert!(result.is_err());
     }
-
     #[test]
-    fn upsert_skips_tasks_from_unmapped_projects() {
-        let conn = test_conn();
-        // No class mapped to "proj1" — task must be skipped, not errored.
-        let task = sample_task("todoist-1", None);
-        upsert_task(&conn, &task).unwrap();
-
-        let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM tasks", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(count, 0);
+    fn malformed_cycle_fails_atomically() {
+        let conn = test_connection();
+        seed(&conn);
+        assert!(apply(
+            &conn,
+            &[snapshot(
+                serde_json::json!([task("a", Some("b")), task("b", Some("a"))]),
+                true
+            )]
+        )
+        .is_err());
     }
-
     #[test]
-    fn upsert_preserves_parent_child_relationship() {
-        let conn = test_conn();
-        seed_mapped_class(&conn, "proj1");
-        let parent = sample_task("todoist-parent", None);
-        let child = sample_task("todoist-child", Some("todoist-parent"));
-
-        upsert_task(&conn, &parent).unwrap();
-        upsert_task(&conn, &child).unwrap();
-
-        let parent_task_id: Option<i64> = conn
-            .query_row(
-                "SELECT parent_task_id FROM tasks WHERE external_id = 'todoist-child'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        let expected_parent_id: i64 = conn
-            .query_row(
-                "SELECT id FROM tasks WHERE external_id = 'todoist-parent'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        assert_eq!(parent_task_id, Some(expected_parent_id));
-    }
-
-    #[test]
-    fn upsert_updates_renamed_task_content_without_duplicating() {
-        let conn = test_conn();
-        seed_mapped_class(&conn, "proj1");
-        let mut task = sample_task("todoist-1", None);
-        upsert_task(&conn, &task).unwrap();
-
-        task.content = "Renamed title".to_string();
-        upsert_task(&conn, &task).unwrap();
-
-        let (count, title): (i64, String) = conn
-            .query_row(
-                "SELECT COUNT(*), MAX(title) FROM tasks WHERE external_id = 'todoist-1'",
-                [],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )
-            .unwrap();
-        assert_eq!(count, 1);
-        assert_eq!(title, "Renamed title");
+    fn full_sync_absence_is_unknown_not_false_completion() {
+        let conn = test_connection();
+        seed(&conn);
+        apply(
+            &conn,
+            &[snapshot(serde_json::json!([task("a", None)]), true)],
+        )
+        .unwrap();
+        apply(&conn, &[snapshot(serde_json::json!([]), true)]).unwrap();
+        assert_eq!(
+            conn.query_row("SELECT external_state FROM tasks", [], |r| r
+                .get::<_, String>(0))
+                .unwrap(),
+            "unknown"
+        );
     }
 }

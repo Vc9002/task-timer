@@ -72,6 +72,19 @@ macOS). Migrations run automatically on startup; nothing to run by hand.
    list. Only tasks in mapped projects are imported.
 5. Re-run "Sync now" any time; re-syncing never creates duplicates.
 
+Sync runs once shortly after startup if configured, and on **Sync now**. There
+is no periodic polling. Network requests run outside the SQLite mutex; imports
+and the incremental cursor commit atomically. Read-only Todoist API v1 Sync
+provides completion/deletion updates. A full-sync task disappearance is marked
+unknown, not guessed to be completed. Existing rows and tracked history remain.
+
+Project mappings live in `todoist_projects`; multiple projects may map to one
+class. Selecting **Unmapped** hides imported work from Today while retaining
+history. Mapping to another class moves the existing task IDs, including their
+history, to that class. Unmapped remote tasks are cached locally for later mapping.
+
+API behavior: https://developer.todoist.com/api/v1/#tag/Sync
+
 Todoist integration is currently read-only: changes made in the app are not
 pushed back to Todoist.
 

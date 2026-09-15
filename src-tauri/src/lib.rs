@@ -23,10 +23,6 @@ use timer::{
     pause_timer, resume_timer, start_timer,
 };
 
-/// How often to check for a background Todoist sync while the app is open.
-/// Deliberately conservative — no sync at all while idle/minimized.
-const BACKGROUND_SYNC_INTERVAL_SECS: u64 = 15 * 60;
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -39,16 +35,16 @@ pub fn run() {
             app.manage(Db(Mutex::new(conn)));
 
             let app_handle = app.handle().clone();
-            std::thread::spawn(move || loop {
-                std::thread::sleep(std::time::Duration::from_secs(
-                    BACKGROUND_SYNC_INTERVAL_SECS,
-                ));
-                if let (Ok(Some(token)), Some(db)) =
-                    (todoist::get_token(), app_handle.try_state::<Db>())
-                {
-                    if let Ok(conn) = db.0.lock() {
-                        let _ = todoist::sync::sync_now(&conn, &token);
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_secs(2));
+                match todoist::get_token() {
+                    Ok(Some(_)) => {
+                        if let Err(error) = todoist::sync::sync_now(&app_handle.state::<Db>()) {
+                            eprintln!("Startup Todoist sync: {error}");
+                        }
                     }
+                    Ok(None) => {}
+                    Err(_) => eprintln!("Startup Todoist sync: keychain unavailable"),
                 }
             });
 

@@ -5,7 +5,13 @@ use std::sync::Mutex;
 pub struct Db(pub Mutex<Connection>);
 
 /// Migrations in order. Each one runs exactly once, tracked in `schema_migrations`.
-const MIGRATIONS: &[(&str, &str)] = &[("0001_init", include_str!("migrations/0001_init.sql"))];
+const MIGRATIONS: &[(&str, &str)] = &[
+    ("0001_init", include_str!("migrations/0001_init.sql")),
+    (
+        "0002_sync_safety",
+        include_str!("migrations/0002_sync_safety.sql"),
+    ),
+];
 
 pub fn open(app_data_dir: &Path) -> rusqlite::Result<Connection> {
     std::fs::create_dir_all(app_data_dir).expect("failed to create app data dir");
@@ -28,21 +34,92 @@ fn run_migrations(conn: &Connection) -> rusqlite::Result<()> {
     )?;
 
     for (name, sql) in MIGRATIONS {
-        let already_applied: bool = conn
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE name = ?1)",
-                [name],
-                |row| row.get(0),
-            )
-            .unwrap_or(false);
+        let already_applied: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE name = ?1)",
+            [name],
+            |row| row.get(0),
+        )?;
 
         if already_applied {
             continue;
         }
 
-        conn.execute_batch(sql)?;
-        conn.execute("INSERT INTO schema_migrations (name) VALUES (?1)", [name])?;
+        apply_migration(conn, name, sql)?;
     }
 
     Ok(())
+}
+
+fn apply_migration(conn: &Connection, name: &str, sql: &str) -> rusqlite::Result<()> {
+    let tx = conn.unchecked_transaction()?;
+    tx.execute_batch(sql)?;
+    tx.execute("INSERT INTO schema_migrations (name) VALUES (?1)", [name])?;
+    tx.commit()
+}
+
+#[cfg(test)]
+pub(crate) fn test_connection() -> Connection {
+    let conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
+    run_migrations(&conn).unwrap();
+    conn
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn migration_failure_rolls_back_schema_and_version() {
+        let conn = test_connection();
+        assert!(apply_migration(
+            &conn,
+            "bad",
+            "CREATE TABLE partial(id); INSERT INTO nonexistent VALUES(1);"
+        )
+        .is_err());
+        let count: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_master WHERE name='partial'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0);
+        let count: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM schema_migrations WHERE name='bad'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0);
+        run_migrations(&conn).unwrap();
+    }
+    #[test]
+    fn upgrade_preserves_legacy_mapping_and_history() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(include_str!("migrations/0001_init.sql"))
+            .unwrap();
+        conn.execute_batch("INSERT INTO classes(id,course_code,semester,todoist_project_id) VALUES(1,'LGST','Fall','p'); INSERT INTO tasks(id,class_id,title) VALUES(1,1,'Read'); INSERT INTO time_sessions(task_id,start_ts,end_ts,final_duration_seconds) VALUES(1,'2026-09-14','2026-09-15',60);").unwrap();
+        conn.execute_batch(include_str!("migrations/0002_sync_safety.sql"))
+            .unwrap();
+        assert_eq!(
+            conn.query_row(
+                "SELECT class_id FROM todoist_projects WHERE todoist_id='p'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            1
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT final_duration_seconds FROM time_sessions",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            60
+        );
+    }
 }

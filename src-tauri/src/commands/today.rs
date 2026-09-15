@@ -35,7 +35,7 @@ pub struct TodaySummary {
 /// or explicitly scheduled for today.
 const TODAY_TASK_IDS_SQL: &str = "
     SELECT DISTINCT t.id FROM tasks t
-    WHERE t.status != 'completed' AND (
+    WHERE t.status != 'completed' AND (t.source='local' OR (t.external_state='active' AND EXISTS (SELECT 1 FROM todoist_projects p WHERE p.todoist_id=t.todoist_project_id AND p.class_id=t.class_id))) AND (
         date(t.due_at) = date('now', 'localtime')
         OR (?1 = 1 AND t.due_at IS NOT NULL AND date(t.due_at) < date('now', 'localtime'))
         OR t.scheduled_date = date('now', 'localtime')
