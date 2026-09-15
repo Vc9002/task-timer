@@ -4,6 +4,7 @@
   import { timerStore } from "$lib/stores/timer.svelte";
   import Modal from "$lib/components/Modal.svelte";
   import { formatHms } from "$lib/format";
+  import { createTask, listClasses, type ClassRecord } from "$lib/api";
 
   let { children } = $props();
 
@@ -23,6 +24,13 @@
 
   let editingRecovery = $state(false);
   let recoveryMinutes = $state<number | undefined>(0);
+  let quickAddOpen = $state(false);
+  let quickTitle = $state("");
+  let quickClass = $state<number | null>(null);
+  let quickEstimate = $state("");
+  let quickSchedule = $state("");
+  let quickClasses = $state<ClassRecord[]>([]);
+  let quickError = $state("");
 
   const links = [
     { href: "/", label: "Today" },
@@ -44,7 +52,40 @@
   async function finish() {
     await timerStore.finish();
   }
+
+  async function openQuickAdd() {
+    quickClasses = await listClasses();
+    quickClass = quickClasses[0]?.id ?? null;
+    quickAddOpen = true;
+    quickError = "";
+  }
+  async function addQuickTask() {
+    if (!quickTitle.trim() || quickClass === null) return;
+    try {
+      await createTask({ class_id: quickClass, parent_task_id: null, title: quickTitle.trim(), description: null,
+        priority: null, due_at: null, scheduled_date: quickSchedule || null,
+        estimated_minutes: quickEstimate ? Number(quickEstimate) : null });
+      quickTitle = ""; quickEstimate = ""; quickSchedule = ""; quickAddOpen = false;
+    } catch { quickError = "Could not create this task. Try again."; }
+  }
 </script>
+
+<svelte:window onkeydown={(event) => {
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); void openQuickAdd(); }
+}} />
+
+{#if quickAddOpen}
+  <Modal title="Add Task" onclose={() => quickAddOpen = false}>
+    <form onsubmit={(event) => { event.preventDefault(); void addQuickTask(); }}>
+      <label>Task <input bind:value={quickTitle} /></label>
+      <label>Class <select bind:value={quickClass}>{#each quickClasses as c}<option value={c.id}>{c.course_code}</option>{/each}</select></label>
+      <label>Schedule <input type="date" bind:value={quickSchedule} /></label>
+      <label>Estimate (minutes) <input type="number" min="0" bind:value={quickEstimate} /></label>
+      <button type="submit" disabled={!quickTitle.trim() || quickClass === null}>Add</button>
+      {#if quickError}<p role="alert">{quickError}</p>{/if}
+    </form>
+  </Modal>
+{/if}
 
 {#if timerStore.conflict}
   <Modal title="Switch timer?" onclose={() => { if (!timerStore.busy) timerStore.conflict = null; }}>

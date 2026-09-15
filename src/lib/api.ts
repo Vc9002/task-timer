@@ -82,6 +82,20 @@ export function createTask(input: NewTask): Promise<TaskRecord> {
   return invoke("create_task", { input });
 }
 
+export interface UpdateTask {
+  id: number;
+  title: string;
+  description: string | null;
+  priority: number | null;
+  due_at: string | null;
+  scheduled_date: string | null;
+  estimated_minutes: number | null;
+}
+
+export function updateTask(input: UpdateTask): Promise<TaskRecord> {
+  return invoke("update_task", { input });
+}
+
 export function setTaskStatus(
   id: number,
   status: TaskRecord["status"]

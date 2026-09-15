@@ -98,7 +98,7 @@ pub fn get_analytics_week(db: State<Db>) -> Result<RangeSummary, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     range_summary(
         &conn,
-        "date(ts.start_ts, 'localtime') >= date('now', 'localtime', 'weekday 0', '-7 days')",
+        "date(ts.start_ts, 'localtime') >= date('now', 'localtime', '-' || ((CAST(strftime('%w', 'now', 'localtime') AS INTEGER) + 6) % 7) || ' days')",
     )
     .map_err(|e| e.to_string())
 }

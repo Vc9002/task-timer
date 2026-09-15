@@ -1,6 +1,6 @@
 <script lang="ts">
   import TaskTreeNode from "./TaskTreeNode.svelte";
-  import { scheduleTask, setTaskStatus, type TaskRecord } from "$lib/api";
+  import { scheduleTask, setTaskStatus, updateTask, type TaskRecord } from "$lib/api";
   import { timerStore } from "$lib/stores/timer.svelte";
   import { formatDurationShort, localDate } from "$lib/format";
   type TreeTask = TaskRecord & { context_only?: boolean; overdue?: boolean };
@@ -11,6 +11,10 @@
   let busy = $state(false);
   let error = $state("");
   let pickingDate = $state(false);
+  let editing = $state(false);
+  let editTitle = $state("");
+  let editDue = $state("");
+  let editEstimate = $state("");
   let children = $derived(tasks.filter(t => t.parent_task_id === task.id && !path.includes(t.id) && t.id !== task.id));
   async function change(action: () => Promise<unknown>) {
     busy = true; error = "";
@@ -51,12 +55,20 @@
         {#if pickingDate}<input aria-label={`Schedule ${task.title}`} type="date" value={task.scheduled_date ?? ""} disabled={busy}
           onchange={(e) => change(() => scheduleTask(task.id, e.currentTarget.value || null))} />{/if}
         {#if task.scheduled_date}<button disabled={busy} onclick={() => change(() => scheduleTask(task.id, null))}>Clear schedule</button>{/if}
-        {#if onedit}<button onclick={() => onedit?.(task)}>Edit</button>{/if}
+        {#if task.source === "local"}<button onclick={() => { editing = !editing; editTitle = task.title; editDue = task.due_at?.slice(0, 10) ?? ""; editEstimate = task.estimated_minutes?.toString() ?? ""; }}>Edit</button>{/if}
         {#if onhistory}<button onclick={() => onhistory?.(task.id)}>History</button>{/if}
         {#if ondelete && task.source === "local"}<button onclick={() => ondelete?.(task.id)}>Delete</button>{/if}
       </div>
     </details>
   </div>
+  {#if editing}
+    <form class="edit-form" onsubmit={(event) => { event.preventDefault(); void change(() => updateTask({ id: task.id, title: editTitle, description: task.description, priority: task.priority, due_at: editDue || null, scheduled_date: task.scheduled_date, estimated_minutes: editEstimate ? Number(editEstimate) : null })); editing = false; }}>
+      <input aria-label="Task title" bind:value={editTitle} />
+      <input aria-label="Due date" type="date" bind:value={editDue} />
+      <input aria-label="Estimated minutes" type="number" min="0" bind:value={editEstimate} />
+      <button type="submit">Save</button>
+    </form>
+  {/if}
   {#if error}<p role="alert">{error}</p>{/if}
   {#if children.length}
     <ul>
@@ -80,5 +92,6 @@
   details { position: relative; }
   .actions { position: absolute; z-index: 5; right: 0; width: 170px; padding: .65rem; background: #fafafa; border: 1px solid #aaa; border-radius: 6px; display: grid; gap: .4rem; box-shadow: 0 3px 10px #0002; }
   .context > .title { opacity: .7; }
+  .edit-form { display: flex; gap: .4rem; padding: .4rem 0 .4rem 1.8rem; }
   @media(prefers-color-scheme: dark) { .actions { background: #303030; } }
 </style>
