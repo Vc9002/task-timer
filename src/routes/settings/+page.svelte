@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import DesktopSettings from "$lib/components/DesktopSettings.svelte";
   import {
     getTodoistStatus,
     setTodoistToken,
@@ -89,6 +90,7 @@
 
 <main class="container">
   <h1>Settings</h1>
+  <DesktopSettings />
 
   {#if error}<p class="error">{error}</p>{/if}
 

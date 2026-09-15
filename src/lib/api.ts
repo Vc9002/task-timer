@@ -1,5 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 
+export function exportData(format: "csv" | "json"): Promise<void> { return invoke("export_data", { format }); }
+export interface NotificationPreferences { enabled: boolean; overrun_percent: number }
+export function notificationSettings(): Promise<NotificationPreferences> { return invoke("notification_settings"); }
+export function saveNotificationSettings(settings: NotificationPreferences): Promise<void> { return invoke("save_notification_settings", { settings }); }
+export function testNotification(): Promise<void> { return invoke("test_notification"); }
+
 // ---------- Classes ----------
 
 export interface ClassRecord {

@@ -277,16 +277,21 @@ pub fn core_switch_timer(
 
 #[tauri::command]
 pub fn switch_timer(
+    app: tauri::AppHandle,
     db: State<Db>,
     session_id: i64,
     task_id: i64,
 ) -> Result<ActiveSessionInfo, TimerError> {
     let conn = db.0.lock().map_err(lock_err)?;
-    core_switch_timer(&conn, session_id, task_id)
+    let result = core_switch_timer(&conn, session_id, task_id);
+    drop(conn);
+    crate::tray::changed(&app);
+    result
 }
 
 #[tauri::command]
 pub fn recover_timer(
+    app: tauri::AppHandle,
     db: State<Db>,
     session_id: i64,
     duration_seconds: i64,
@@ -305,6 +310,8 @@ pub fn recover_timer(
     core_finish_timer(&tx).map_err(|_| "Couldn't finish the timer")?;
     let result = core_edit_session_duration(&tx, session_id, duration_seconds)?;
     tx.commit().map_err(|_| "Couldn't save the timer")?;
+    drop(conn);
+    crate::tray::changed(&app);
     Ok(result)
 }
 
@@ -325,33 +332,52 @@ pub fn get_active_session(db: State<Db>) -> Result<Option<ActiveSessionInfo>, Ti
 }
 
 #[tauri::command]
-pub fn start_timer(db: State<Db>, task_id: i64) -> Result<ActiveSessionInfo, TimerError> {
+pub fn start_timer(
+    app: tauri::AppHandle,
+    db: State<Db>,
+    task_id: i64,
+) -> Result<ActiveSessionInfo, TimerError> {
     let conn = db.0.lock().map_err(lock_err)?;
-    core_start_timer(&conn, task_id)
+    let result = core_start_timer(&conn, task_id);
+    drop(conn);
+    crate::tray::changed(&app);
+    result
 }
 
 #[tauri::command]
-pub fn pause_timer(db: State<Db>) -> Result<ActiveSessionInfo, TimerError> {
+pub fn pause_timer(app: tauri::AppHandle, db: State<Db>) -> Result<ActiveSessionInfo, TimerError> {
     let conn = db.0.lock().map_err(lock_err)?;
-    core_pause_timer(&conn)
+    let result = core_pause_timer(&conn);
+    drop(conn);
+    crate::tray::changed(&app);
+    result
 }
 
 #[tauri::command]
-pub fn resume_timer(db: State<Db>) -> Result<ActiveSessionInfo, TimerError> {
+pub fn resume_timer(app: tauri::AppHandle, db: State<Db>) -> Result<ActiveSessionInfo, TimerError> {
     let conn = db.0.lock().map_err(lock_err)?;
-    core_resume_timer(&conn)
+    let result = core_resume_timer(&conn);
+    drop(conn);
+    crate::tray::changed(&app);
+    result
 }
 
 #[tauri::command]
-pub fn finish_timer(db: State<Db>) -> Result<Session, TimerError> {
+pub fn finish_timer(app: tauri::AppHandle, db: State<Db>) -> Result<Session, TimerError> {
     let conn = db.0.lock().map_err(lock_err)?;
-    core_finish_timer(&conn)
+    let result = core_finish_timer(&conn);
+    drop(conn);
+    crate::tray::changed(&app);
+    result
 }
 
 #[tauri::command]
-pub fn cancel_timer(db: State<Db>) -> Result<(), TimerError> {
+pub fn cancel_timer(app: tauri::AppHandle, db: State<Db>) -> Result<(), TimerError> {
     let conn = db.0.lock().map_err(lock_err)?;
-    core_cancel_timer(&conn)
+    let result = core_cancel_timer(&conn);
+    drop(conn);
+    crate::tray::changed(&app);
+    result
 }
 
 #[tauri::command]

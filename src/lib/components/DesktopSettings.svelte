@@ -1,0 +1,66 @@
+<script lang="ts">
+  import { onMount } from "svelte";
+  import { invoke } from "@tauri-apps/api/core";
+  import { exportData, notificationSettings, saveNotificationSettings, testNotification } from "$lib/api";
+  type Settings = { close_to_tray: boolean; start_hidden: boolean; shortcuts: string[] };
+  let settings = $state<Settings | null>(null);
+  let autostart = $state(false);
+  let busy = $state(false);
+  let message = $state("");
+  let warning = $state<string | null>(null);
+  let notifications = $state({ enabled: false, overrun_percent: 25 });
+  async function load() {
+    const status = await invoke<{ settings: Settings; autostart: boolean; shortcut_warning: string | null }>("desktop_status");
+    settings = status.settings; autostart = status.autostart; warning = status.shortcut_warning; notifications = await notificationSettings();
+  }
+  async function saveNotifications() { busy = true; message = ""; try { await saveNotificationSettings(notifications); message = "Notification settings saved."; } catch (error) { message = String(error); } finally { busy = false; } }
+  onMount(() => { void load().catch(() => message = "Couldn't load desktop settings."); });
+  async function save() {
+    busy = true; message = "";
+    try { await invoke("save_desktop_settings", { settings }); await load(); message = "Desktop settings saved."; }
+    catch (error) { message = String(error); }
+    finally { busy = false; }
+  }
+  async function login(enabled: boolean) {
+    busy = true; message = "";
+    try { await invoke("set_autostart", { enabled }); await load(); }
+    catch (error) { message = String(error); }
+    finally { busy = false; }
+  }
+</script>
+<section>
+  <h2>Desktop</h2>
+  {#if settings}
+    <form onsubmit={e => { e.preventDefault(); void save(); }}>
+      <fieldset disabled={busy}>
+        <label>Close button behavior <select bind:value={settings.close_to_tray}><option value={true}>Hide to menu bar / system tray</option><option value={false}>Quit TaskTimer</option></select></label>
+        <p>Use Quit TaskTimer in the tray menu to exit completely.</p>
+        <label><input type="checkbox" checked={autostart} onchange={e => login(e.currentTarget.checked)} /> Start TaskTimer when I log in</label>
+        <label><input type="checkbox" bind:checked={settings.start_hidden} /> Start hidden when launched at login</label>
+        <h3>Global shortcuts</h3>
+        {#each ["Start / Switch Task", "Pause / Resume", "Finish Timer"] as label, i}
+          <label>{label}<input bind:value={settings.shortcuts[i]} spellcheck="false" /></label>
+        {/each}
+        <p>Use CommandOrControl+Shift+T format. Leave blank to disable an action. Cmd/Ctrl+K opens Quick Add inside TaskTimer.</p>
+        <button type="submit">Save desktop settings</button>
+      </fieldset>
+    </form>
+  {/if}
+  {#if warning}<p role="alert">{warning}</p>{/if}
+  <h3>Notifications</h3>
+  <label><input type="checkbox" bind:checked={notifications.enabled} /> Timer estimate overrun</label>
+  <label>Notify after <select bind:value={notifications.overrun_percent}><option value={0}>100% of estimate</option><option value={25}>125% of estimate</option><option value={50}>150% of estimate</option></select></label>
+  <button disabled={busy} onclick={() => saveNotifications()}>Save notifications</button>
+  <button disabled={!notifications.enabled || busy} onclick={() => testNotification()}>Send test notification</button>
+  <h3>Export</h3>
+  <button onclick={() => exportData("csv")}>Export history CSV</button>
+  <button onclick={() => exportData("json")}>Export all data JSON</button>
+  {#if message}<p role="status">{message}</p>{/if}
+</section>
+<style>
+  section { margin-bottom: 2rem; }
+  fieldset { border: 0; padding: 0; }
+  label { display: block; margin: .65rem 0; }
+  input:not([type=checkbox]), select { display: block; padding: .4rem; min-width: 19rem; }
+  p { font-size: .85rem; max-width: 40rem; }
+</style>

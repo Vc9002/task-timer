@@ -1,7 +1,11 @@
 mod commands;
 mod db;
+mod desktop;
+mod export;
+mod reminders;
 mod timer;
 mod todoist;
+mod tray;
 
 use commands::analytics::{
     get_analytics_month, get_analytics_today, get_analytics_week, get_day_view, get_task_history,
@@ -26,6 +30,18 @@ use timer::{
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _, _| {
+            tray::show(app)
+        }))
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(
+            tauri_plugin_autostart::Builder::new()
+                .arg("--autostart")
+                .macos_launcher(tauri_plugin_autostart::MacosLauncher::LaunchAgent)
+                .build(),
+        )
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let app_data_dir = app
                 .path()
@@ -33,6 +49,9 @@ pub fn run() {
                 .expect("failed to resolve app data dir");
             let conn = db::open(&app_data_dir).expect("failed to open database");
             app.manage(Db(Mutex::new(conn)));
+            tray::setup(app.handle())?;
+            desktop::setup(app.handle())?;
+            reminders::setup(app.handle());
 
             let app_handle = app.handle().clone();
             std::thread::spawn(move || {
@@ -50,7 +69,33 @@ pub fn run() {
 
             Ok(())
         })
+        .on_window_event(|window, event| {
+            if matches!(event, tauri::WindowEvent::Focused(true)) {
+                reminders::wake(window.app_handle());
+            }
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let hide = window
+                    .app_handle()
+                    .try_state::<desktop::DesktopState>()
+                    .and_then(|state| state.settings.lock().ok().map(|s| s.close_to_tray))
+                    .unwrap_or(false);
+                if hide && window.hide().is_ok() {
+                    api.prevent_close();
+                } else {
+                    window.app_handle().exit(0);
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
+            reminders::notification_settings,
+            reminders::save_notification_settings,
+            reminders::test_notification,
+            export::export_data,
+            desktop::desktop_status,
+            desktop::save_desktop_settings,
+            desktop::set_autostart,
+            tray::take_desktop_action,
+            tray::list_startable_tasks,
             list_classes,
             create_class,
             update_class,

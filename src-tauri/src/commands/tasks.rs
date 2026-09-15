@@ -91,6 +91,7 @@ pub fn list_tasks_for_class(db: State<Db>, class_id: i64) -> Result<Vec<Task>, S
 #[tauri::command]
 pub fn create_task(db: State<Db>, input: NewTask) -> Result<Task, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
+    validate_new_task(&conn, &input)?;
     conn.execute(
         "INSERT INTO tasks (class_id, parent_task_id, title, description, priority,
          due_at, scheduled_date, estimated_minutes)
@@ -110,6 +111,27 @@ pub fn create_task(db: State<Db>, input: NewTask) -> Result<Task, String> {
     let id = conn.last_insert_rowid();
     conn.query_row(&format!("{TASK_SELECT} WHERE id = ?1"), [id], row_to_task)
         .map_err(|e| e.to_string())
+}
+
+fn validate_new_task(conn: &rusqlite::Connection, input: &NewTask) -> Result<(), String> {
+    if input.title.trim().is_empty() {
+        return Err("Enter a task title.".into());
+    }
+    if input.estimated_minutes.is_some_and(|n| n < 0) {
+        return Err("Estimate must be zero or greater.".into());
+    }
+    for date in [&input.due_at, &input.scheduled_date].into_iter().flatten() {
+        if chrono::NaiveDate::parse_from_str(date, "%Y-%m-%d").is_err() {
+            return Err("Choose a valid date.".into());
+        }
+    }
+    if let Some(parent) = input.parent_task_id {
+        let valid: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND class_id=?2 AND source='local' AND status!='completed')",rusqlite::params![parent,input.class_id],|r| r.get(0)).map_err(|_| "Couldn't check parent task")?;
+        if !valid {
+            return Err("Choose an incomplete local parent in the same class.".into());
+        }
+    }
+    Ok(())
 }
 
 #[tauri::command]

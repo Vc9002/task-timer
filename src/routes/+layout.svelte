@@ -4,17 +4,36 @@
   import { timerStore } from "$lib/stores/timer.svelte";
   import Modal from "$lib/components/Modal.svelte";
   import { formatHms } from "$lib/format";
-  import { createTask, listClasses, type ClassRecord } from "$lib/api";
+  import QuickAdd from "$lib/components/QuickAdd.svelte";
+  import { invoke } from "@tauri-apps/api/core";
+  import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+  import TaskPicker from "$lib/components/TaskPicker.svelte";
+  let pickerOpen = $state(false);
 
   let { children } = $props();
 
   onMount(() => {
     timerStore.mount();
+    let disposed = false;
+    const unlisteners: UnlistenFn[] = [];
+    const addListener = (promise: Promise<UnlistenFn>) => void promise.then(unlisten => { if (disposed) unlisten(); else unlisteners.push(unlisten); }).catch(() => timerStore.error = "Desktop controls couldn't connect. Reopen TaskTimer.");
+    const action = async () => {
+      const pending = await invoke<string | null>("take_desktop_action");
+      if (disposed) return;
+      if (pending === "start-task") pickerOpen = true;
+      if (pending === "quick-add") await openQuickAdd();
+    };
+    addListener(listen("timer-changed", () => { void timerStore.refresh(); timerStore.revision++; }));
+    addListener(listen<string>("desktop-error", event => timerStore.error = event.payload));
+    addListener(listen("desktop-action", () => { void action(); }));
+    void action().catch(() => {});
     const refresh = () => { if (document.visibilityState === "visible") void timerStore.refresh(); };
     window.addEventListener("focus", refresh);
     window.addEventListener("pageshow", refresh);
     document.addEventListener("visibilitychange", refresh);
     return () => {
+      disposed = true;
+      unlisteners.forEach(unlisten => unlisten());
       timerStore.destroy();
       window.removeEventListener("focus", refresh);
       window.removeEventListener("pageshow", refresh);
@@ -25,12 +44,6 @@
   let editingRecovery = $state(false);
   let recoveryMinutes = $state<number | undefined>(0);
   let quickAddOpen = $state(false);
-  let quickTitle = $state("");
-  let quickClass = $state<number | null>(null);
-  let quickEstimate = $state("");
-  let quickSchedule = $state("");
-  let quickClasses = $state<ClassRecord[]>([]);
-  let quickError = $state("");
 
   const links = [
     { href: "/", label: "Today" },
@@ -54,37 +67,18 @@
   }
 
   async function openQuickAdd() {
-    quickClasses = await listClasses();
-    quickClass = quickClasses[0]?.id ?? null;
     quickAddOpen = true;
-    quickError = "";
-  }
-  async function addQuickTask() {
-    if (!quickTitle.trim() || quickClass === null) return;
-    try {
-      await createTask({ class_id: quickClass, parent_task_id: null, title: quickTitle.trim(), description: null,
-        priority: null, due_at: null, scheduled_date: quickSchedule || null,
-        estimated_minutes: quickEstimate ? Number(quickEstimate) : null });
-      quickTitle = ""; quickEstimate = ""; quickSchedule = ""; quickAddOpen = false;
-    } catch { quickError = "Could not create this task. Try again."; }
   }
 </script>
 
+{#if pickerOpen}<TaskPicker onclose={() => pickerOpen = false} />{/if}
+
 <svelte:window onkeydown={(event) => {
-  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); void openQuickAdd(); }
+  if (!event.repeat && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); void openQuickAdd(); }
 }} />
 
 {#if quickAddOpen}
-  <Modal title="Add Task" onclose={() => quickAddOpen = false}>
-    <form onsubmit={(event) => { event.preventDefault(); void addQuickTask(); }}>
-      <label>Task <input bind:value={quickTitle} /></label>
-      <label>Class <select bind:value={quickClass}>{#each quickClasses as c}<option value={c.id}>{c.course_code}</option>{/each}</select></label>
-      <label>Schedule <input type="date" bind:value={quickSchedule} /></label>
-      <label>Estimate (minutes) <input type="number" min="0" bind:value={quickEstimate} /></label>
-      <button type="submit" disabled={!quickTitle.trim() || quickClass === null}>Add</button>
-      {#if quickError}<p role="alert">{quickError}</p>{/if}
-    </form>
-  </Modal>
+  <QuickAdd onclose={() => quickAddOpen = false} />
 {/if}
 
 {#if timerStore.conflict}
@@ -119,6 +113,8 @@
     {#each links as link}
       <a href={link.href} class:active={$page.url.pathname === link.href}>{link.label}</a>
     {/each}
+    <button onclick={() => pickerOpen = true}>Start Task</button>
+    <button onclick={openQuickAdd}>Add Task</button>
   </nav>
 
   <div class="content">

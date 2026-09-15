@@ -159,8 +159,14 @@
     }
   }
 
-  onMount(refresh);
+  onMount(() => {
+    void refresh();
+    const reload = () => { if (expanded !== null) void listTasksForClass(expanded).then(tasks => { if (expanded !== null) tasksByClass[expanded] = tasks; }); };
+    window.addEventListener("tasks-changed", reload);
+    return () => window.removeEventListener("tasks-changed", reload);
+  });
 </script>
+
 
 <main class="container">
   <h1>Classes</h1>
