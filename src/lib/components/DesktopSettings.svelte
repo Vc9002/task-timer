@@ -14,6 +14,18 @@
     settings = status.settings; autostart = status.autostart; warning = status.shortcut_warning; notifications = await notificationSettings();
   }
   async function saveNotifications() { busy = true; message = ""; try { await saveNotificationSettings(notifications); message = "Notification settings saved."; } catch (error) { message = String(error); } finally { busy = false; } }
+  async function exportFile(format: "csv" | "tasks" | "json") {
+    busy = true; message = "";
+    try { message = await exportData(format) ? "Export saved." : "Export cancelled."; }
+    catch (error) { message = String(error); }
+    finally { busy = false; }
+  }
+  async function sendTest() {
+    busy = true; message = "";
+    try { await testNotification(); message = "Test notification sent. If it doesn't appear, check system notification settings."; }
+    catch (error) { message = String(error); }
+    finally { busy = false; }
+  }
   onMount(() => { void load().catch(() => message = "Couldn't load desktop settings."); });
   async function save() {
     busy = true; message = "";
@@ -51,10 +63,13 @@
   <label><input type="checkbox" bind:checked={notifications.enabled} /> Timer estimate overrun</label>
   <label>Notify after <select bind:value={notifications.overrun_percent}><option value={0}>100% of estimate</option><option value={25}>125% of estimate</option><option value={50}>150% of estimate</option></select></label>
   <button disabled={busy} onclick={() => saveNotifications()}>Save notifications</button>
-  <button disabled={!notifications.enabled || busy} onclick={() => testNotification()}>Send test notification</button>
+  <button disabled={!notifications.enabled || busy} onclick={sendTest}>Send test notification</button>
+  <p>Save before testing. Your operating system may block notifications. Each threshold is sent once per session. Failed submissions retry on the next timer change, focus, or launch.</p>
   <h3>Export</h3>
-  <button onclick={() => exportData("csv")}>Export history CSV</button>
-  <button onclick={() => exportData("json")}>Export all data JSON</button>
+  <button disabled={busy} onclick={() => exportFile("tasks")}>Export tasks CSV</button>
+  <button disabled={busy} onclick={() => exportFile("csv")}>Export history CSV</button>
+  <button disabled={busy} onclick={() => exportFile("json")}>Export all data JSON</button>
+  <p>JSON preserves classes, task hierarchy, time history, and project mappings. Credentials and settings are excluded. Restore/import is not available yet.</p>
   {#if message}<p role="status">{message}</p>{/if}
 </section>
 <style>
