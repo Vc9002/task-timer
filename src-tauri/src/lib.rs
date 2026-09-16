@@ -29,17 +29,15 @@ use timer::{
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let autostart = tauri_plugin_autostart::Builder::new().arg("--autostart");
+    #[cfg(target_os = "macos")]
+    let autostart = autostart.macos_launcher(tauri_plugin_autostart::MacosLauncher::LaunchAgent);
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _, _| {
             tray::show(app)
         }))
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
-        .plugin(
-            tauri_plugin_autostart::Builder::new()
-                .arg("--autostart")
-                .macos_launcher(tauri_plugin_autostart::MacosLauncher::LaunchAgent)
-                .build(),
-        )
+        .plugin(autostart.build())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
