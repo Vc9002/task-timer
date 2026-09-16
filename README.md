@@ -102,7 +102,7 @@ tasks update in place, parent/child relationships are preserved, tasks from
 unmapped projects are skipped).
 
 ```bash
-cargo clippy --all-targets
+cargo clippy --all-targets --all-features -- -D warnings
 cargo fmt --check
 ```
 
@@ -121,3 +121,38 @@ incomplete descendants and ancestor context at any depth, only in active
 classes. Local tasks can be completed directly; complete Todoist tasks in
 Todoist, then sync. Row time includes descendants; the header is finished time
 tracked today, counted once per session, including work already completed.
+
+## Desktop controls
+
+The menu bar/system tray offers Start/Switch Task, Quick Add, Pause/Resume,
+Finish, Open, and Quit. On macOS and Windows, closing the window hides it by
+default; Settings can change this to Quit. The tray's Quit always exits.
+Tray contents update only on timer transitions, with no elapsed-time polling.
+
+Global shortcuts default to Cmd/Ctrl+Shift+T (task picker),
+Cmd/Ctrl+Shift+Space (pause/resume), and Cmd/Ctrl+Shift+F (finish).
+Change them in Settings, or leave a shortcut blank to disable it. Cmd/Ctrl+K
+opens Quick Add inside the app; due date and planned study date are separate,
+and an incomplete local task in the same class can be selected as parent.
+
+Login autostart is off by default. Optional hidden startup applies only to
+login launches. A second launch opens the existing process.
+
+Overrun notifications are opt-in and compare the task's direct tracked time
+with its estimate at 100%, 125%, or 150%. One sleeping worker waits until the
+next threshold or a timer/settings change; it does not poll the database.
+Successful OS submission is recorded per session and threshold. Failed sends
+retry on the next state change, focus, or launch. OS notification settings may
+still prevent display. No reminders are guaranteed while the app is closed.
+
+## Export
+
+Settings exports task CSV, time-history CSV (including class context, minutes,
+source, and edits), and JSON containing classes, task hierarchy, sessions, and
+Todoist project mappings. JSON is a consistent database snapshot with a format
+version and export timestamp. Credentials, settings, and sync caches are
+excluded. JSON restore/import is not implemented yet.
+
+CSV tracked minutes are direct finished-session time, so nested tasks are not
+counted twice. Unfinished session durations stay blank. Session timestamps are
+UTC; the history CSV date uses the exporting machine's local timezone.

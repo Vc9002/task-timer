@@ -398,12 +398,16 @@ pub fn list_sessions_for_task(db: State<Db>, task_id: i64) -> Result<Vec<Session
 /// preserving the original timestamps for audit.
 #[tauri::command]
 pub fn edit_session_duration(
+    app: tauri::AppHandle,
     db: State<Db>,
     session_id: i64,
     final_duration_seconds: i64,
 ) -> Result<Session, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
-    core_edit_session_duration(&conn, session_id, final_duration_seconds)
+    let result = core_edit_session_duration(&conn, session_id, final_duration_seconds);
+    drop(conn);
+    crate::reminders::wake(&app);
+    result
 }
 
 #[cfg(test)]

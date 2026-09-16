@@ -114,14 +114,10 @@ fn check(app: &AppHandle) -> Result<Option<Duration>, String> {
         let Some(estimate) = estimate.filter(|n| *n > 0) else {
             return Ok(None);
         };
-        let key = format!(
-            "overrun_sent_{}_{}",
-            active.session.id, settings.overrun_percent
-        );
         let sent: bool = conn
             .query_row(
-                "SELECT EXISTS(SELECT 1 FROM app_settings WHERE key=?1)",
-                [&key],
+                "SELECT EXISTS(SELECT 1 FROM session_notifications WHERE session_id=?1 AND notification_type='overrun' AND threshold=?2 AND status='sent')",
+                rusqlite::params![active.session.id,settings.overrun_percent],
                 |r| r.get(0),
             )
             .map_err(|_| "Couldn't read reminder state")?;
@@ -137,26 +133,52 @@ fn check(app: &AppHandle) -> Result<Option<Duration>, String> {
         if seconds > 0 {
             return Ok(Some(Duration::from_secs(seconds as u64)));
         }
-        // Claim before delivery: at most one attempt even across restart or OS failure.
         conn.execute(
-            "INSERT INTO app_settings(key,value) VALUES(?1,'attempted')",
-            [key],
+            "INSERT INTO session_notifications(session_id,notification_type,threshold,status,attempts,attempted_at) VALUES(?1,'overrun',?2,'attempted',1,datetime('now')) ON CONFLICT(session_id,notification_type,threshold) DO UPDATE SET status='attempted',attempts=attempts+1,attempted_at=datetime('now')",
+            rusqlite::params![active.session.id,settings.overrun_percent],
         )
         .map_err(|_| "Couldn't save reminder state")?;
-        format!(
-            "{} has passed its {}m estimate. Tracked directly: {}m.",
-            active.task_title,
-            estimate,
-            (finished + active.elapsed_seconds) / 60
+        (
+            active.session.id,
+            settings.overrun_percent,
+            format!(
+                "{} has passed its {}m estimate. Tracked directly: {}m.",
+                active.task_title,
+                estimate,
+                (finished + active.elapsed_seconds) / 60
+            ),
         )
     };
-    app.notification()
+    let delivered = app
+        .notification()
         .builder()
         .title("TaskTimer")
-        .body(notification)
+        .body(notification.2)
         .show()
-        .map_err(|_| "Overrun notification delivery failed")?;
+        .is_ok();
+    {
+        let db = app.state::<Db>();
+        let conn =
+            db.0.lock()
+                .map_err(|_| "Couldn't record notification result")?;
+        record_result(&conn, notification.0, notification.1, delivered)
+            .map_err(|_| "Couldn't record notification result")?;
+    }
+    // Failures retry on the next state/focus change or startup, never a polling loop.
+    if !delivered {
+        return Err("Overrun notification delivery failed; will retry on next state change".into());
+    }
     Ok(None)
+}
+
+fn record_result(
+    conn: &rusqlite::Connection,
+    session_id: i64,
+    threshold: u32,
+    sent: bool,
+) -> rusqlite::Result<()> {
+    conn.execute("UPDATE session_notifications SET status=?3,sent_at=CASE WHEN ?3='sent' THEN datetime('now') ELSE NULL END WHERE session_id=?1 AND notification_type='overrun' AND threshold=?2",rusqlite::params![session_id,threshold,if sent { "sent" } else { "failed" }])?;
+    Ok(())
 }
 pub fn setup(app: &AppHandle) {
     let state = Arc::new(Wake::default());
@@ -202,6 +224,34 @@ pub fn setup(app: &AppHandle) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn delivery_failure_can_retry_and_cancel_cleans_only_notification_state() {
+        let conn = crate::db::test_connection();
+        conn.execute_batch("INSERT INTO classes(id,course_code,semester) VALUES(1,'LGST','Fall'); INSERT INTO tasks(id,class_id,title) VALUES(1,1,'Read'); INSERT INTO time_sessions(id,task_id,start_ts) VALUES(1,1,'2026-09-15'); INSERT INTO session_notifications(session_id,notification_type,threshold,status,attempts) VALUES(1,'overrun',25,'attempted',1);").unwrap();
+        record_result(&conn, 1, 25, false).unwrap();
+        assert_eq!(
+            conn.query_row("SELECT status FROM session_notifications", [], |r| r
+                .get::<_, String>(0))
+                .unwrap(),
+            "failed"
+        );
+        record_result(&conn, 1, 25, true).unwrap();
+        assert!(conn
+            .query_row(
+                "SELECT sent_at IS NOT NULL FROM session_notifications",
+                [],
+                |r| r.get::<_, bool>(0)
+            )
+            .unwrap());
+        conn.execute("DELETE FROM time_sessions WHERE id=1", [])
+            .unwrap();
+        assert_eq!(
+            conn.query_row("SELECT count(*) FROM session_notifications", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+    }
     #[test]
     fn overrun_uses_direct_work_and_threshold() {
         assert_eq!(remaining(40, 25, 600, 1200), 1200);

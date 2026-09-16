@@ -135,7 +135,11 @@ fn validate_new_task(conn: &rusqlite::Connection, input: &NewTask) -> Result<(),
 }
 
 #[tauri::command]
-pub fn update_task(db: State<Db>, input: UpdateTask) -> Result<Task, String> {
+pub fn update_task(
+    app: tauri::AppHandle,
+    db: State<Db>,
+    input: UpdateTask,
+) -> Result<Task, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     conn.execute(
         "UPDATE tasks SET title = CASE WHEN source='local' THEN ?1 ELSE title END,
@@ -155,12 +159,16 @@ pub fn update_task(db: State<Db>, input: UpdateTask) -> Result<Task, String> {
         ],
     )
     .map_err(|e| e.to_string())?;
-    conn.query_row(
-        &format!("{TASK_SELECT} WHERE id = ?1"),
-        [input.id],
-        row_to_task,
-    )
-    .map_err(|e| e.to_string())
+    let result = conn
+        .query_row(
+            &format!("{TASK_SELECT} WHERE id = ?1"),
+            [input.id],
+            row_to_task,
+        )
+        .map_err(|e| e.to_string());
+    drop(conn);
+    crate::reminders::wake(&app);
+    result
 }
 
 #[tauri::command]

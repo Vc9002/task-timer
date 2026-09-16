@@ -11,6 +11,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "0002_sync_safety",
         include_str!("migrations/0002_sync_safety.sql"),
     ),
+    (
+        "0003_session_notifications",
+        include_str!("migrations/0003_session_notifications.sql"),
+    ),
 ];
 
 pub fn open(app_data_dir: &Path) -> rusqlite::Result<Connection> {
@@ -68,6 +72,47 @@ pub(crate) fn test_connection() -> Connection {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn notification_upgrade_preserves_history_and_moves_legacy_attempts() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "PRAGMA foreign_keys=ON; CREATE TABLE schema_migrations(name TEXT PRIMARY KEY);",
+        )
+        .unwrap();
+        for (name, sql) in &MIGRATIONS[..2] {
+            apply_migration(&conn, name, sql).unwrap();
+        }
+        conn.execute_batch("INSERT INTO classes(id,course_code,semester) VALUES(1,'LGST','Fall'); INSERT INTO tasks(id,class_id,title) VALUES(1,1,'Read'); INSERT INTO time_sessions(id,task_id,start_ts,end_ts,final_duration_seconds) VALUES(1,1,'2026-09-15','2026-09-16',60); INSERT INTO app_settings(key,value) VALUES('overrun_sent_1_25','attempted'),('overrun_v02','{}');").unwrap();
+        run_migrations(&conn).unwrap();
+        run_migrations(&conn).unwrap();
+        assert_eq!(
+            conn.query_row("SELECT status FROM session_notifications", [], |r| r
+                .get::<_, String>(0))
+                .unwrap(),
+            "legacy_unknown"
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT SUM(final_duration_seconds) FROM time_sessions",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            60
+        );
+        assert_eq!(
+            conn.query_row("SELECT count(*) FROM app_settings", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            conn.query_row("SELECT count(*) FROM session_notifications", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+    }
     #[test]
     fn migration_failure_rolls_back_schema_and_version() {
         let conn = test_connection();
