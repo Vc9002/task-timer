@@ -147,6 +147,7 @@
       {#if syncMessage}<p class="muted">{syncMessage}</p>{/if}
 
       <h3>Project mappings</h3>
+      <p class="muted">Todoist course tags are matched automatically to active classes by exact course code (for example, <code>LGST 1000</code>). Project mappings remain available as an override.</p>
       <ul class="mappings">
         {#each mappings as m (m.todoist_id)}
           <li>

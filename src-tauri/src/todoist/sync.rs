@@ -223,7 +223,19 @@ pub(crate) fn reconcile_cached(conn: &Connection) -> rusqlite::Result<usize> {
                 |r| r.get(0),
             )
             .optional()?
-            .flatten();
+            .flatten()
+            .or_else(|| {
+                task.labels.iter().find_map(|label| {
+                    conn.query_row(
+                        "SELECT id FROM classes WHERE active=1 AND (course_code=?1 OR name=?1)",
+                        [label],
+                        |r| r.get(0),
+                    )
+                    .optional()
+                    .ok()
+                    .flatten()
+                })
+            });
         let Some(class_id) = class_id else {
             continue;
         };
@@ -276,6 +288,22 @@ mod tests {
     }
     fn task(id: &str, parent: Option<&str>) -> serde_json::Value {
         serde_json::json!({"id":id,"project_id":"p","parent_id":parent,"content":id})
+    }
+    #[test]
+    fn labels_match_classes_when_project_is_unmapped() {
+        let conn = test_connection();
+        conn.execute(
+            "INSERT INTO classes(id,course_code,semester) VALUES(1,'LGST 1000','Fall')",
+            [],
+        )
+        .unwrap();
+        apply(&conn, &[snapshot(serde_json::json!([{"id":"tagged","project_id":"p","parent_id":null,"content":"Tagged","labels":["LGST 1000"]}]), true)]).unwrap();
+        assert_eq!(
+            conn.query_row("SELECT count(*) FROM tasks WHERE class_id=1", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
     }
     fn seed(conn: &Connection) {
         conn.execute_batch("INSERT INTO classes(id,course_code,semester) VALUES(1,'LGST','Fall'),(2,'CRIM','Fall'); INSERT INTO todoist_projects(todoist_id,name,class_id) VALUES('p','Course',1);").unwrap();

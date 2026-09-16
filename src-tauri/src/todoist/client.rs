@@ -34,10 +34,13 @@ pub struct TodoistTask {
     #[serde(default)]
     pub is_deleted: bool,
     pub completed_at: Option<String>,
+    #[serde(default)]
+    pub labels: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct RemoteSync {
+    #[serde(default)]
     pub projects: Vec<TodoistProject>,
     pub items: Vec<TodoistTask>,
     pub sync_token: String,
@@ -101,7 +104,7 @@ impl TodoistClient {
             .map_err(|_| TodoistApiError::InvalidResponse)?;
         form.query_pairs_mut()
             .append_pair("sync_token", cursor)
-            .append_pair("resource_types", "[\"projects\",\"items\"]");
+            .append_pair("resource_types", "[\"projects\",\"items\",\"labels\"]");
         let resp = self
             .http
             .post(format!("{}/sync", self.base))
