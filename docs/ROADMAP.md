@@ -15,6 +15,22 @@ Still intentionally deferred: Canvas import, full Todoist field write-back,
 advanced analytics, automatic scheduling, and AI. These are separate releases
 and must not be mixed into the stabilization work.
 
+## v0.3.3 — Productivity workflow pass (next)
+
+Planned in controlled slices: command palette and universal search, Inbox,
+recurring-template editing, Week parent breadcrumbs, interactive Calendar
+rescheduling, task types and tags, duplicate/undo actions, time budgets,
+Focus Mode, and a compact menu-bar elapsed display. Each slice requires its
+own tests and a real-use check before the next one begins.
+
+## v0.4.1 — Integration completion
+
+Todoist completion write-back is already queued through the durable outbox.
+Remaining integration work is explicit per-field ownership, reliable retry
+status in the UI, and Canvas read-only import with stable course/assignment
+links. Canvas must not overwrite TaskTimer scheduling, estimates, subtasks, or
+time history.
+
 ## Path
 
 ```

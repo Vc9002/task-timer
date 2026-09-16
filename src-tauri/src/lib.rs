@@ -13,7 +13,7 @@ use commands::analytics::{
 use commands::classes::{archive_class, create_class, list_classes, update_class};
 use commands::recurrence::{
     create_recurring_template, get_calendar, list_recurring_templates,
-    set_recurring_template_active,
+    set_recurring_template_active, update_recurring_template,
 };
 use commands::tasks::{
     create_task, delete_task, list_tasks_for_class, schedule_task, set_task_status, update_task,
@@ -52,8 +52,9 @@ pub fn run() {
                 .expect("failed to resolve app data dir");
             let conn = db::open(&app_data_dir).expect("failed to open database");
             app.manage(Db(Mutex::new(conn)));
-            todoist::sync::recover_inflight_outbox(&app.state::<Db>())
-                .expect("failed to recover Todoist outbox");
+            if let Err(error) = todoist::sync::recover_inflight_outbox(&app.state::<Db>()) {
+                eprintln!("Todoist outbox recovery: {error}");
+            }
             tray::setup(app.handle())?;
             desktop::setup(app.handle())?;
             reminders::setup(app.handle());
@@ -118,6 +119,7 @@ pub fn run() {
             list_recurring_templates,
             create_recurring_template,
             set_recurring_template_active,
+            update_recurring_template,
             get_calendar,
             get_active_session,
             start_timer,

@@ -123,7 +123,7 @@
               <li class:completed={task.status === "completed"}>
                 <div class="task-main">
                   <span class="course">{task.course_code}</span>
-                  <strong>{task.title}</strong>
+                  <strong>{#if task.parent_path}<span class="breadcrumb">{task.parent_path} › </span>{/if}{task.title}</strong>
                   <span class="meta">
                     {#if task.remaining_minutes !== null}{task.remaining_minutes}m remaining{/if}
                     {#if task.due_at}· Due {new Date(task.due_at).toLocaleDateString(undefined, { weekday: "short" })}{/if}

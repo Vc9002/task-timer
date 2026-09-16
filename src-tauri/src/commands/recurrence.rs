@@ -33,6 +33,20 @@ pub struct NewRecurringTemplate {
     pub start_date: String,
     pub end_date: Option<String>,
 }
+#[derive(Debug, Deserialize)]
+pub struct UpdateRecurringTemplate {
+    pub id: i64,
+    pub class_id: i64,
+    pub title: String,
+    pub description: Option<String>,
+    pub priority: Option<i64>,
+    pub estimated_minutes: Option<i64>,
+    pub recurrence_type: String,
+    pub interval: Option<i64>,
+    pub weekdays: Option<String>,
+    pub start_date: String,
+    pub end_date: Option<String>,
+}
 fn template_row(row: &rusqlite::Row) -> rusqlite::Result<RecurringTemplate> {
     Ok(RecurringTemplate {
         id: row.get(0)?,
@@ -160,6 +174,40 @@ pub fn set_recurring_template_active(db: State<Db>, id: i64, active: bool) -> Re
     }
     tx.commit().map_err(|_| "Couldn't update recurring task")?;
     Ok(())
+}
+
+#[tauri::command]
+pub fn update_recurring_template(
+    db: State<Db>,
+    input: UpdateRecurringTemplate,
+) -> Result<RecurringTemplate, String> {
+    let new = NewRecurringTemplate {
+        class_id: input.class_id,
+        title: input.title.clone(),
+        description: input.description.clone(),
+        priority: input.priority,
+        estimated_minutes: input.estimated_minutes,
+        recurrence_type: input.recurrence_type.clone(),
+        interval: input.interval,
+        weekdays: input.weekdays.clone(),
+        start_date: input.start_date.clone(),
+        end_date: input.end_date.clone(),
+    };
+    validate(&new)?;
+    let c = db.0.lock().map_err(|_| "Couldn't update recurring task")?;
+    let tx = c
+        .unchecked_transaction()
+        .map_err(|_| "Couldn't update recurring task")?;
+    tx.execute("UPDATE recurring_task_templates SET class_id=?1,title=?2,description=?3,priority=?4,estimated_minutes=?5,recurrence_type=?6,interval=?7,weekdays=?8,start_date=?9,end_date=?10,updated_at=datetime('now') WHERE id=?11", params![new.class_id,new.title.trim(),new.description,new.priority.unwrap_or(2),new.estimated_minutes,new.recurrence_type,new.interval.unwrap_or(1),new.weekdays,new.start_date,new.end_date,input.id]).map_err(|_| "Couldn't update recurring task")?;
+    tx.execute("DELETE FROM tasks WHERE recurring_template_id=?1 AND status!='completed' AND occurrence_date >= date('now','localtime') AND NOT EXISTS (SELECT 1 FROM time_sessions WHERE task_id=tasks.id)", [input.id]).map_err(|_| "Couldn't update recurring occurrences")?;
+    tx.commit().map_err(|_| "Couldn't update recurring task")?;
+    ensure_generated(&c, 45).map_err(|_| "Couldn't generate recurring tasks")?;
+    c.query_row(
+        &format!("{TEMPLATE_SQL} WHERE id=?1"),
+        [input.id],
+        template_row,
+    )
+    .map_err(|e| e.to_string())
 }
 
 #[derive(Debug, Serialize)]

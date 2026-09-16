@@ -20,6 +20,7 @@ pub struct WeekTask {
     pub remaining_minutes: Option<i64>,
     pub overdue: bool,
     pub context_only: bool,
+    pub parent_path: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -62,6 +63,18 @@ fn to_week_task(
         None => false,
     };
     let not_completed = task.status != "completed";
+    let mut path = Vec::new();
+    let mut parent = task.parent_task_id;
+    while let Some(pid) = parent {
+        let (title, next): (String, Option<i64>) = conn.query_row(
+            "SELECT title,parent_task_id FROM tasks WHERE id=?1",
+            [pid],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
+        path.push(title);
+        parent = next;
+    }
+    path.reverse();
     Ok(WeekTask {
         id: task.id,
         class_id: task.class_id,
@@ -76,6 +89,7 @@ fn to_week_task(
         remaining_minutes: task.remaining_minutes,
         overdue: overdue && not_completed,
         context_only,
+        parent_path: (!path.is_empty()).then(|| path.join(" › ")),
     })
 }
 
@@ -208,6 +222,7 @@ pub(crate) fn week_for(conn: &Connection, start_date: &str) -> rusqlite::Result<
                 remaining_minutes: t.remaining_minutes,
                 overdue: t.overdue,
                 context_only: t.context_only,
+                parent_path: t.parent_path.clone(),
             })
             .collect();
         let estimated_minutes_remaining =

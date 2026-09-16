@@ -156,6 +156,7 @@ export interface WeekTask {
   remaining_minutes: number | null;
   overdue: boolean;
   context_only?: boolean;
+  parent_path?: string | null;
 }
 
 export interface WeekDay {
@@ -205,6 +206,8 @@ export interface NewRecurringTemplate {
 export function listRecurringTemplates(): Promise<RecurringTemplate[]> { return invoke("list_recurring_templates"); }
 export function createRecurringTemplate(input: NewRecurringTemplate): Promise<RecurringTemplate> { return invoke("create_recurring_template", { input }); }
 export function setRecurringTemplateActive(id: number, active: boolean): Promise<void> { return invoke("set_recurring_template_active", { id, active }); }
+export interface UpdateRecurringTemplate extends NewRecurringTemplate { id: number; }
+export function updateRecurringTemplate(input: UpdateRecurringTemplate): Promise<RecurringTemplate> { return invoke("update_recurring_template", { input }); }
 export interface CalendarDay { date: string; planned: TaskRecord[]; due: TaskRecord[]; }
 export function getCalendar(month: string): Promise<CalendarDay[]> { return invoke("get_calendar", { month }); }
 
