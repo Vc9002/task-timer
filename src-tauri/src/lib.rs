@@ -11,6 +11,10 @@ use commands::analytics::{
     get_analytics_month, get_analytics_today, get_analytics_week, get_day_view, get_task_history,
 };
 use commands::classes::{archive_class, create_class, list_classes, update_class};
+use commands::recurrence::{
+    create_recurring_template, get_calendar, list_recurring_templates,
+    set_recurring_template_active,
+};
 use commands::tasks::{
     create_task, delete_task, list_tasks_for_class, schedule_task, set_task_status, update_task,
 };
@@ -109,6 +113,10 @@ pub fn run() {
             get_week,
             get_study_capacity,
             set_study_capacity,
+            list_recurring_templates,
+            create_recurring_template,
+            set_recurring_template_active,
+            get_calendar,
             get_active_session,
             start_timer,
             switch_timer,

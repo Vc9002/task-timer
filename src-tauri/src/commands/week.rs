@@ -101,6 +101,7 @@ fn capacity_for(conn: &Connection, date: &str, weekday: u32) -> rusqlite::Result
 }
 
 pub(crate) fn week_for(conn: &Connection, start_date: &str) -> rusqlite::Result<WeekSummary> {
+    crate::commands::recurrence::ensure_generated(conn, 45)?;
     let start = NaiveDate::parse_from_str(start_date, "%Y-%m-%d")
         .unwrap_or_else(|_| chrono::Local::now().date_naive());
     let end = start + Duration::days(6);

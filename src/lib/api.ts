@@ -191,6 +191,22 @@ export function setStudyCapacity(weekdayMinutes: (number | null)[]): Promise<voi
   return invoke("set_study_capacity", { weekdayMinutes });
 }
 
+export interface RecurringTemplate {
+  id: number; class_id: number; title: string; description: string | null; priority: number;
+  estimated_minutes: number | null; recurrence_type: "daily" | "weekly" | "weekdays";
+  interval: number; weekdays: string | null; start_date: string; end_date: string | null; active: boolean;
+}
+export interface NewRecurringTemplate {
+  class_id: number; title: string; description: string | null; priority: number | null;
+  estimated_minutes: number | null; recurrence_type: RecurringTemplate["recurrence_type"];
+  interval: number | null; weekdays: string | null; start_date: string; end_date: string | null;
+}
+export function listRecurringTemplates(): Promise<RecurringTemplate[]> { return invoke("list_recurring_templates"); }
+export function createRecurringTemplate(input: NewRecurringTemplate): Promise<RecurringTemplate> { return invoke("create_recurring_template", { input }); }
+export function setRecurringTemplateActive(id: number, active: boolean): Promise<void> { return invoke("set_recurring_template_active", { id, active }); }
+export interface CalendarDay { date: string; planned: TaskRecord[]; due: TaskRecord[]; }
+export function getCalendar(month: string): Promise<CalendarDay[]> { return invoke("get_calendar", { month }); }
+
 // ---------- Timer ----------
 
 export interface Session {

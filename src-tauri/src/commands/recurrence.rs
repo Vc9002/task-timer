@@ -1,0 +1,214 @@
+use crate::commands::tasks::{row_to_task, Task, TASK_SELECT};
+use crate::db::Db;
+use chrono::{Datelike, Duration, NaiveDate};
+use rusqlite::{params, Connection};
+use serde::{Deserialize, Serialize};
+use tauri::State;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecurringTemplate {
+    pub id: i64,
+    pub class_id: i64,
+    pub title: String,
+    pub description: Option<String>,
+    pub priority: i64,
+    pub estimated_minutes: Option<i64>,
+    pub recurrence_type: String,
+    pub interval: i64,
+    pub weekdays: Option<String>,
+    pub start_date: String,
+    pub end_date: Option<String>,
+    pub active: bool,
+}
+#[derive(Debug, Deserialize)]
+pub struct NewRecurringTemplate {
+    pub class_id: i64,
+    pub title: String,
+    pub description: Option<String>,
+    pub priority: Option<i64>,
+    pub estimated_minutes: Option<i64>,
+    pub recurrence_type: String,
+    pub interval: Option<i64>,
+    pub weekdays: Option<String>,
+    pub start_date: String,
+    pub end_date: Option<String>,
+}
+fn template_row(row: &rusqlite::Row) -> rusqlite::Result<RecurringTemplate> {
+    Ok(RecurringTemplate {
+        id: row.get(0)?,
+        class_id: row.get(1)?,
+        title: row.get(2)?,
+        description: row.get(3)?,
+        priority: row.get(4)?,
+        estimated_minutes: row.get(5)?,
+        recurrence_type: row.get(6)?,
+        interval: row.get(7)?,
+        weekdays: row.get(8)?,
+        start_date: row.get(9)?,
+        end_date: row.get(10)?,
+        active: row.get::<_, i64>(11)? != 0,
+    })
+}
+fn valid_date(v: &str) -> bool {
+    NaiveDate::parse_from_str(v, "%Y-%m-%d").is_ok()
+}
+fn validate(i: &NewRecurringTemplate) -> Result<(), String> {
+    if i.title.trim().is_empty() {
+        return Err("Enter a recurring task title.".into());
+    }
+    if !["daily", "weekly", "weekdays"].contains(&i.recurrence_type.as_str()) {
+        return Err("Choose a valid recurrence.".into());
+    }
+    if i.interval.unwrap_or(1) < 1
+        || i.priority.unwrap_or(2) < 1
+        || i.priority.unwrap_or(2) > 4
+        || i.estimated_minutes.is_some_and(|n| n < 0)
+    {
+        return Err("Check the recurrence interval, priority, and estimate.".into());
+    }
+    if !valid_date(&i.start_date)
+        || i.end_date.as_deref().is_some_and(|d| !valid_date(d))
+        || i.end_date.as_ref().is_some_and(|d| d < &i.start_date)
+    {
+        return Err("Choose a valid date range.".into());
+    }
+    Ok(())
+}
+fn should_generate(t: &RecurringTemplate, date: NaiveDate) -> bool {
+    let start = NaiveDate::parse_from_str(&t.start_date, "%Y-%m-%d").unwrap();
+    if date < start
+        || t.end_date
+            .as_ref()
+            .and_then(|d| NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
+            .is_some_and(|e| date > e)
+    {
+        return false;
+    }
+    let days = (date - start).num_days();
+    match t.recurrence_type.as_str() {
+        "daily" => days % t.interval == 0,
+        "weekly" => days % 7 == 0 && (days / 7) % t.interval == 0,
+        "weekdays" => date.weekday().number_from_monday() <= 5 && days % t.interval == 0,
+        _ => false,
+    }
+}
+pub(crate) fn ensure_generated(conn: &Connection, horizon_days: i64) -> rusqlite::Result<usize> {
+    let today = chrono::Local::now().date_naive();
+    let horizon = today + Duration::days(horizon_days);
+    let ts: Vec<RecurringTemplate> = conn.prepare("SELECT id,class_id,title,description,priority,estimated_minutes,recurrence_type,interval,weekdays,start_date,end_date,active FROM recurring_task_templates WHERE active=1")?.query_map([], template_row)?.collect::<Result<_,_>>()?;
+    let mut count = 0;
+    for t in ts {
+        let mut d = today.max(NaiveDate::parse_from_str(&t.start_date, "%Y-%m-%d").unwrap());
+        while d <= horizon {
+            if should_generate(&t, d) {
+                count += conn.execute("INSERT OR IGNORE INTO tasks(class_id,title,description,priority,scheduled_date,estimated_minutes,recurring_template_id,occurrence_date) VALUES(?1,?2,?3,?4,?5,?6,?7,?5)", params![t.class_id,t.title,t.description,t.priority,d.to_string(),t.estimated_minutes,t.id])?;
+            }
+            d += Duration::days(1);
+        }
+    }
+    Ok(count)
+}
+const TEMPLATE_SQL: &str = "SELECT id,class_id,title,description,priority,estimated_minutes,recurrence_type,interval,weekdays,start_date,end_date,active FROM recurring_task_templates";
+#[tauri::command]
+pub fn list_recurring_templates(db: State<Db>) -> Result<Vec<RecurringTemplate>, String> {
+    let c = db.0.lock().map_err(|_| "Couldn't load recurring tasks")?;
+    let result = c
+        .prepare(&format!(
+            "{TEMPLATE_SQL} ORDER BY active DESC,start_date,id"
+        ))
+        .map_err(|e| e.to_string())?
+        .query_map([], template_row)
+        .map_err(|e| e.to_string())?
+        .collect::<Result<_, _>>()
+        .map_err(|e| e.to_string());
+    result
+}
+#[tauri::command]
+pub fn create_recurring_template(
+    db: State<Db>,
+    input: NewRecurringTemplate,
+) -> Result<RecurringTemplate, String> {
+    validate(&input)?;
+    let c = db.0.lock().map_err(|_| "Couldn't save recurring task")?;
+    c.execute("INSERT INTO recurring_task_templates(class_id,title,description,priority,estimated_minutes,recurrence_type,interval,weekdays,start_date,end_date) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",params![input.class_id,input.title.trim(),input.description,input.priority.unwrap_or(2),input.estimated_minutes,input.recurrence_type,input.interval.unwrap_or(1),input.weekdays,input.start_date,input.end_date]).map_err(|_| "Couldn't save recurring task")?;
+    let id = c.last_insert_rowid();
+    ensure_generated(&c, 45).map_err(|_| "Couldn't generate recurring tasks")?;
+    c.query_row(&format!("{TEMPLATE_SQL} WHERE id=?1"), [id], template_row)
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+pub fn set_recurring_template_active(db: State<Db>, id: i64, active: bool) -> Result<(), String> {
+    let c = db.0.lock().map_err(|_| "Couldn't update recurring task")?;
+    c.execute(
+        "UPDATE recurring_task_templates SET active=?1,updated_at=datetime('now') WHERE id=?2",
+        params![active, id],
+    )
+    .map_err(|_| "Couldn't update recurring task")?;
+    Ok(())
+}
+
+#[derive(Debug, Serialize)]
+pub struct CalendarDay {
+    pub date: String,
+    pub planned: Vec<Task>,
+    pub due: Vec<Task>,
+}
+#[tauri::command]
+pub fn get_calendar(db: State<Db>, month: String) -> Result<Vec<CalendarDay>, String> {
+    let first = NaiveDate::parse_from_str(&(month + "-01"), "%Y-%m-%d")
+        .map_err(|_| "Choose a valid month")?;
+    let next = first
+        .checked_add_months(chrono::Months::new(1))
+        .ok_or("Invalid month")?;
+    let c = db.0.lock().map_err(|_| "Couldn't load calendar")?;
+    ensure_generated(&c, 45).map_err(|_| "Couldn't prepare recurring tasks")?;
+    let tasks:Vec<Task>=c.prepare(&format!("{TASK_SELECT} WHERE t.class_id IN (SELECT id FROM classes WHERE active=1) AND t.status != 'completed' AND ((t.scheduled_date >= ?1 AND t.scheduled_date < ?2) OR (substr(t.due_at,1,10) >= ?1 AND substr(t.due_at,1,10) < ?2)) ORDER BY t.id")).map_err(|_| "Couldn't load calendar tasks")?.query_map(params![first.to_string(),next.to_string()],row_to_task).map_err(|_| "Couldn't load calendar tasks")?.collect::<Result<_,_>>().map_err(|_| "Couldn't load calendar tasks")?;
+    let mut out = Vec::new();
+    let mut d = first;
+    while d < next {
+        let key = d.to_string();
+        let planned = tasks
+            .iter()
+            .filter(|t| t.scheduled_date.as_deref() == Some(key.as_str()))
+            .cloned()
+            .collect();
+        let due = tasks
+            .iter()
+            .filter(|t| t.due_at.as_deref().is_some_and(|v| v.starts_with(&key)))
+            .cloned()
+            .collect();
+        out.push(CalendarDay {
+            date: key,
+            planned,
+            due,
+        });
+        d += Duration::days(1);
+    }
+    Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn db() -> Connection {
+        let c = crate::db::test_connection();
+        c.execute(
+            "INSERT INTO classes(id,course_code,semester) VALUES(1,'TEST','Fall')",
+            [],
+        )
+        .unwrap();
+        c
+    }
+    #[test]
+    fn daily_occurrences_are_unique() {
+        let c = db();
+        c.execute("INSERT INTO recurring_task_templates(class_id,title,recurrence_type,start_date) VALUES(1,'Review','daily',?1)", [&chrono::Local::now().date_naive().to_string()]).unwrap();
+        ensure_generated(&c, 3).unwrap();
+        ensure_generated(&c, 3).unwrap();
+        assert_eq!(
+            c.query_row("SELECT count(*) FROM tasks", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            4
+        );
+    }
+}

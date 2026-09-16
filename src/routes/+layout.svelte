@@ -50,6 +50,7 @@
   const links = [
     { href: "/", label: "Today", icon: "today" },
     { href: "/week", label: "Week", icon: "week" },
+    { href: "/calendar", label: "Calendar", icon: "today" },
     { href: "/classes", label: "Classes", icon: "classes" },
     { href: "/history", label: "History", icon: "history" },
     { href: "/analytics", label: "Analytics", icon: "analytics" },
