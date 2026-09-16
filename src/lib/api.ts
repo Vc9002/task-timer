@@ -66,6 +66,8 @@ export interface TaskRecord {
   external_id: string | null;
   completed_at: string | null;
   tracked_seconds: number;
+  tracked_seconds_direct: number;
+  remaining_minutes: number | null;
   external_state: "active" | "completed" | "deleted" | "unknown";
 }
 
@@ -131,10 +133,62 @@ export interface TodaySummary {
   task_count: number;
   estimated_minutes_total: number;
   tracked_seconds_total: number;
+  next_up: TodayTask[];
 }
 
 export function getToday(includeOverdue = true): Promise<TodaySummary> {
   return invoke("get_today", { includeOverdue });
+}
+
+// ---------- Week ----------
+
+export interface WeekTask {
+  id: number;
+  class_id: number;
+  course_code: string;
+  title: string;
+  status: TaskRecord["status"];
+  due_at: string | null;
+  scheduled_date: string | null;
+  estimated_minutes: number | null;
+  tracked_seconds_direct: number;
+  tracked_seconds_total: number;
+  remaining_minutes: number | null;
+  overdue: boolean;
+}
+
+export interface WeekDay {
+  date: string;
+  tasks: WeekTask[];
+  estimated_minutes_remaining: number;
+  tracked_seconds: number;
+  capacity_minutes: number | null;
+  load_percent: number | null;
+}
+
+export interface WeekSummary {
+  start_date: string;
+  end_date: string;
+  days: WeekDay[];
+  unscheduled: WeekTask[];
+  estimated_minutes_remaining: number;
+  tracked_seconds: number;
+}
+
+export function getWeek(startDate: string): Promise<WeekSummary> {
+  return invoke("get_week", { startDate });
+}
+
+export interface CapacitySettings {
+  weekday_minutes: (number | null)[];
+}
+
+export function getStudyCapacity(): Promise<CapacitySettings> {
+  return invoke("get_study_capacity");
+}
+
+export function setStudyCapacity(weekdayMinutes: (number | null)[]): Promise<void> {
+  return invoke("set_study_capacity", { weekdayMinutes });
 }
 
 // ---------- Timer ----------

@@ -42,6 +42,26 @@
       <span><strong>{formatDurationShort(today.tracked_seconds_total)}</strong>Tracked today</span>
     </div>
 
+    {#if today.next_up.length > 0}
+      <section class="next-up">
+        <h2>Next Up</h2>
+        <ol>
+          {#each today.next_up as task, i (task.id)}
+            <li>
+              <span class="rank">{i + 1}</span>
+              <div>
+                <strong>{task.title}</strong>
+                <span class="meta">
+                  {#if task.overdue}Overdue{:else if task.due_at}Due {new Date(task.due_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}{:else if task.scheduled_date === new Date().toISOString().slice(0, 10)}Scheduled today{/if}
+                  {#if task.remaining_minutes !== null}· {task.remaining_minutes}m remaining{/if}
+                </span>
+              </div>
+            </li>
+          {/each}
+        </ol>
+      </section>
+    {/if}
+
     {#each today.groups as group (group.class_id)}
       <section class="class-group">
         <h2>{group.course_code}</h2>
@@ -65,6 +85,13 @@ header { display: flex; justify-content: space-between; align-items: end; gap: 1
   .summary { display: flex; gap: 28px; padding: 17px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); margin-bottom: 30px; }
   .summary span { display: flex; flex-direction: column; gap: 3px; color: var(--muted); font-size: 11px; }
   .summary strong { color: var(--text); font-size: 18px; letter-spacing: -.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .next-up { margin-bottom: 30px; }
+  .next-up h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 10px; }
+  .next-up ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+  .next-up li { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; }
+  .next-up .rank { font-size: 12px; font-weight: 700; color: var(--muted); width: 16px; }
+  .next-up strong { display: block; font-size: 13px; }
+  .next-up .meta { font-size: 11px; color: var(--muted); }
   .class-group { margin-bottom: 30px; }
   .class-group h2 { display: flex; align-items: center; gap: 10px; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 8px; }
   .class-group h2::before { content: ""; width: 5px; height: 14px; border-radius: 2px; background: var(--accent); }

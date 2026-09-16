@@ -5,7 +5,7 @@ use serde::Serialize;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use tauri::State;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct TodayTask {
     #[serde(flatten)]
     pub task: Task,
@@ -24,6 +24,29 @@ pub struct TodaySummary {
     pub task_count: i64,
     pub estimated_minutes_total: i64,
     pub tracked_seconds_total: i64,
+    pub next_up: Vec<TodayTask>,
+}
+
+// Understandable ordering, not a numeric score: overdue, then scheduled today,
+// then soonest due, then higher manual priority, then more remaining work,
+// then a stable id tie-break.
+fn next_up_rank(t: &TodayTask, date: &str) -> (i32, i32, String, i32, i64) {
+    let overdue_rank = if t.overdue { 0 } else { 1 };
+    let scheduled_today_rank = if t.task.scheduled_date.as_deref() == Some(date) {
+        0
+    } else {
+        1
+    };
+    let due_key = t.task.due_at.clone().unwrap_or_else(|| "9999-99-99".into());
+    let priority_rank = -(t.task.priority.unwrap_or(2) as i32);
+    let remaining_rank = -(t.task.remaining_minutes.unwrap_or(0));
+    (
+        overdue_rank,
+        scheduled_today_rank,
+        due_key,
+        priority_rank,
+        remaining_rank,
+    )
 }
 
 pub(crate) fn today_for(
@@ -111,11 +134,25 @@ pub(crate) fn today_for(
     let tracked_seconds_total = conn.query_row("SELECT COALESCE(SUM(final_duration_seconds),0) FROM time_sessions WHERE end_ts IS NOT NULL AND date(start_ts,'localtime')=?1",[date],|r|r.get(0))?;
     let mut groups: Vec<_> = groups.into_values().collect();
     groups.sort_by(|a, b| a.course_code.cmp(&b.course_code));
+
+    let mut next_up: Vec<TodayTask> = groups
+        .iter()
+        .flat_map(|g| g.tasks.iter().cloned())
+        .filter(|t| !t.context_only && t.task.status != "completed")
+        .collect();
+    next_up.sort_by(|a, b| {
+        next_up_rank(a, date)
+            .cmp(&next_up_rank(b, date))
+            .then(a.task.id.cmp(&b.task.id))
+    });
+    next_up.truncate(5);
+
     Ok(TodaySummary {
         groups,
         task_count: actionable.len() as i64,
         estimated_minutes_total: estimate,
         tracked_seconds_total,
+        next_up,
     })
 }
 

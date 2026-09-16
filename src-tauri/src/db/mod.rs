@@ -15,6 +15,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "0003_session_notifications",
         include_str!("migrations/0003_session_notifications.sql"),
     ),
+    (
+        "0004_week_planning",
+        include_str!("migrations/0004_week_planning.sql"),
+    ),
 ];
 
 pub fn open(app_data_dir: &Path) -> rusqlite::Result<Connection> {

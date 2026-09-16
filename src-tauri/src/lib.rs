@@ -19,6 +19,7 @@ use commands::todoist::{
     disconnect_todoist, get_todoist_status, list_todoist_project_mappings, map_todoist_project,
     set_todoist_token, sync_todoist_now,
 };
+use commands::week::{get_study_capacity, get_week, set_study_capacity};
 use db::Db;
 use std::sync::Mutex;
 use tauri::Manager;
@@ -105,6 +106,9 @@ pub fn run() {
             set_task_status,
             delete_task,
             get_today,
+            get_week,
+            get_study_capacity,
+            set_study_capacity,
             get_active_session,
             start_timer,
             switch_timer,

@@ -15,6 +15,14 @@ export function formatDurationShort(totalSeconds: number): string {
   return `${m}m`;
 }
 
+export function formatMinutesShort(totalMinutes: number): string {
+  const m = Math.max(0, Math.round(totalMinutes));
+  const h = Math.floor(m / 60);
+  const rem = m % 60;
+  if (h > 0) return rem > 0 ? `${h}h ${rem}m` : `${h}h`;
+  return `${rem}m`;
+}
+
 export function formatSignedDurationShort(deltaSeconds: number): string {
   const sign = deltaSeconds >= 0 ? "+" : "-";
   return `${sign}${formatDurationShort(Math.abs(deltaSeconds))}`;

@@ -18,6 +18,8 @@ pub struct Task {
     pub external_id: Option<String>,
     pub completed_at: Option<String>,
     pub tracked_seconds: i64,
+    pub tracked_seconds_direct: i64,
+    pub remaining_minutes: Option<i64>,
     pub external_state: String,
 }
 
@@ -45,14 +47,22 @@ pub struct UpdateTask {
 }
 
 // Per-row display aggregates descendants. Global analytics always sums sessions directly.
+// tracked_seconds_direct counts only sessions started on this exact task, so
+// remaining-time math never double-counts a parent against its subtasks.
 pub(crate) const TASK_SELECT: &str = "SELECT t.*, (
     WITH RECURSIVE descendants(id) AS (
         SELECT t.id UNION SELECT child.id FROM tasks child JOIN descendants d ON child.parent_task_id=d.id
     ) SELECT COALESCE(SUM(final_duration_seconds),0) FROM time_sessions
       WHERE end_ts IS NOT NULL AND task_id IN (SELECT id FROM descendants)
-) AS tracked_seconds FROM tasks t";
+) AS tracked_seconds, (
+    SELECT COALESCE(SUM(final_duration_seconds),0) FROM time_sessions
+      WHERE end_ts IS NOT NULL AND task_id = t.id
+) AS tracked_seconds_direct FROM tasks t";
 
 pub(crate) fn row_to_task(row: &rusqlite::Row) -> rusqlite::Result<Task> {
+    let estimated_minutes: Option<i64> = row.get("estimated_minutes")?;
+    let tracked_seconds_direct: i64 = row.get("tracked_seconds_direct")?;
+    let remaining_minutes = estimated_minutes.map(|e| (e - tracked_seconds_direct / 60).max(0));
     Ok(Task {
         id: row.get("id")?,
         class_id: row.get("class_id")?,
@@ -63,11 +73,13 @@ pub(crate) fn row_to_task(row: &rusqlite::Row) -> rusqlite::Result<Task> {
         priority: row.get("priority")?,
         due_at: row.get("due_at")?,
         scheduled_date: row.get("scheduled_date")?,
-        estimated_minutes: row.get("estimated_minutes")?,
+        estimated_minutes,
         source: row.get("source")?,
         external_id: row.get("external_id")?,
         completed_at: row.get("completed_at")?,
         tracked_seconds: row.get("tracked_seconds")?,
+        tracked_seconds_direct,
+        remaining_minutes,
         external_state: row.get("external_state")?,
     })
 }

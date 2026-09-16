@@ -4,6 +4,7 @@
   import { timerStore } from "$lib/stores/timer.svelte";
   import { formatDurationShort, localDate } from "$lib/format";
   import Icon from "./Icon.svelte";
+  import { PRIORITY_LABELS, DEFAULT_PRIORITY } from "$lib/priority";
   type TreeTask = TaskRecord & { context_only?: boolean; overdue?: boolean };
   let { task, tasks, courseCode, onchanged, onhistory, ondelete, onedit, path = [] }: {
     task: TreeTask; tasks: TreeTask[]; courseCode: string; onchanged: () => Promise<void>;
@@ -16,6 +17,7 @@
   let editTitle = $state("");
   let editDue = $state("");
   let editEstimate = $state("");
+  let editPriority = $state(DEFAULT_PRIORITY);
   let menu: HTMLDetailsElement;
   let children = $derived(tasks.filter(t => t.parent_task_id === task.id && !path.includes(t.id) && t.id !== task.id));
   async function change(action: () => Promise<unknown>) {
@@ -27,7 +29,7 @@
   }
   async function saveEdit() {
     if (!editTitle.trim()) return;
-    if (await change(() => updateTask({ id: task.id, title: editTitle.trim(), description: task.description, priority: task.priority, due_at: editDue || null, scheduled_date: task.scheduled_date, estimated_minutes: editEstimate ? Number(editEstimate) : null }))) editing = false;
+    if (await change(() => updateTask({ id: task.id, title: editTitle.trim(), description: task.description, priority: editPriority, due_at: editDue || null, scheduled_date: task.scheduled_date, estimated_minutes: editEstimate ? Number(editEstimate) : null }))) editing = false;
   }
   function tomorrow() { const d = new Date(); d.setDate(d.getDate() + 1); return localDate(d); }
 </script>
@@ -65,7 +67,7 @@
         {#if pickingDate}<input aria-label={`Schedule ${task.title}`} type="date" value={task.scheduled_date ?? ""} disabled={busy}
           onchange={(e) => change(() => scheduleTask(task.id, e.currentTarget.value || null))} />{/if}
         {#if task.scheduled_date}<button disabled={busy} onclick={() => change(() => scheduleTask(task.id, null))}>Clear schedule</button>{/if}
-        {#if task.source === "local"}<button onclick={() => { editing = !editing; menu.open = false; editTitle = task.title; editDue = task.due_at?.slice(0, 10) ?? ""; editEstimate = task.estimated_minutes?.toString() ?? ""; }}>Edit task</button>{/if}
+        {#if task.source === "local"}<button onclick={() => { editing = !editing; menu.open = false; editTitle = task.title; editDue = task.due_at?.slice(0, 10) ?? ""; editEstimate = task.estimated_minutes?.toString() ?? ""; editPriority = task.priority ?? DEFAULT_PRIORITY; }}>Edit task</button>{/if}
         {#if onhistory}<button onclick={() => onhistory?.(task.id)}>History</button>{/if}
         {#if ondelete && task.source === "local"}<button onclick={() => ondelete?.(task.id)}>Delete</button>{/if}
       </div>
@@ -76,6 +78,13 @@
       <label>Task title<input required bind:value={editTitle} /></label>
       <label>Due date<input type="date" bind:value={editDue} /></label>
       <label>Estimate (min)<input type="number" min="0" bind:value={editEstimate} /></label>
+      <label>Priority
+        <select bind:value={editPriority}>
+          {#each Object.entries(PRIORITY_LABELS) as [value, label] (value)}
+            <option value={Number(value)}>{label}</option>
+          {/each}
+        </select>
+      </label>
       <div class="edit-buttons"><button type="submit" disabled={busy}>Save changes</button><button type="button" disabled={busy} onclick={() => editing = false}>Cancel</button></div>
     </form>
   {/if}

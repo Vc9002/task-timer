@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import DesktopSettings from "$lib/components/DesktopSettings.svelte";
+  import StudyCapacitySettings from "$lib/components/StudyCapacitySettings.svelte";
   import {
     getTodoistStatus,
     setTodoistToken,
@@ -92,6 +93,7 @@
   <h1>Settings</h1>
   <p class="page-intro">Make TaskTimer work the way you do.</p>
   <DesktopSettings />
+  <StudyCapacitySettings />
 
   {#if error}<p class="error">{error}</p>{/if}
 
