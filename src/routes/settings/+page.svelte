@@ -16,6 +16,7 @@
     listRecurringTemplates,
     createRecurringTemplate,
     setRecurringTemplateActive,
+    updateRecurringTemplate,
     type RecurringTemplate,
   } from "$lib/api";
 
@@ -32,6 +33,7 @@
   let recurringType = $state<RecurringTemplate["recurrence_type"]>("weekly");
   let recurringStart = $state(new Date().toISOString().slice(0, 10));
   let recurringEstimate = $state("");
+  let editingRecurring = $state<number | null>(null);
 
   async function refresh() {
     try {
@@ -109,6 +111,21 @@
       recurringTitle = ""; recurringEstimate = ""; recurring = await listRecurringTemplates();
     } catch (e) { error = String(e); } finally { busy = false; }
   }
+  function editRecurring(template: RecurringTemplate) {
+    editingRecurring = template.id;
+    recurringTitle = template.title; recurringClass = template.class_id;
+    recurringType = template.recurrence_type; recurringStart = template.start_date;
+    recurringEstimate = template.estimated_minutes?.toString() ?? "";
+  }
+  async function saveRecurring(event: Event) {
+    event.preventDefault();
+    if (!editingRecurring || !recurringClass || !recurringTitle.trim()) return;
+    busy = true;
+    try {
+      await updateRecurringTemplate({ id: editingRecurring, class_id: recurringClass, title: recurringTitle.trim(), description: null, priority: 2, estimated_minutes: recurringEstimate ? Number(recurringEstimate) : null, recurrence_type: recurringType, interval: 1, weekdays: null, start_date: recurringStart, end_date: null });
+      editingRecurring = null; recurring = await listRecurringTemplates();
+    } catch (e) { error = String(e); } finally { busy = false; }
+  }
 </script>
 
 <main class="container">
@@ -119,15 +136,15 @@
   <section>
     <h2>Recurring tasks</h2>
     <p class="muted">Create lightweight daily or weekly study routines. Future occurrences are generated automatically; completed history stays intact.</p>
-    <form class="recurring-form" onsubmit={addRecurring}>
+    <form class="recurring-form" onsubmit={editingRecurring ? saveRecurring : addRecurring}>
       <label>Task title<input required placeholder="Chinese vocabulary" bind:value={recurringTitle} /></label>
       <label>Class<select required bind:value={recurringClass}>{#each classes as c (c.id)}<option value={c.id}>{c.course_code}</option>{/each}</select></label>
-      <label>Repeats<select bind:value={recurringType}><option value="daily">Every day</option><option value="weekdays">Weekdays</option><option value="weekly">Every week</option></select></label>
       <label>Starts<input type="date" required bind:value={recurringStart} /></label>
       <label>Estimate (min)<input type="number" min="0" placeholder="30" bind:value={recurringEstimate} /></label>
-      <button type="submit" disabled={busy || !recurringClass}>Add recurring task</button>
+      <button type="submit" disabled={busy || !recurringClass}>{editingRecurring ? "Save changes" : "Add recurring task"}</button>
+      {#if editingRecurring}<button type="button" class="secondary" onclick={() => editingRecurring = null}>Cancel</button>{/if}
     </form>
-    {#if recurring.length}<ul class="recurring-list">{#each recurring as template (template.id)}<li><span><strong>{template.title}</strong><small>{template.recurrence_type} · {template.start_date}</small></span><button class="secondary" onclick={() => { void setRecurringTemplateActive(template.id, !template.active).then(() => listRecurringTemplates().then(v => recurring = v)); }}>{template.active ? "Stop" : "Stopped"}</button></li>{/each}</ul>{/if}
+    {#if recurring.length}<ul class="recurring-list">{#each recurring as template (template.id)}<li><span><strong>{template.title}</strong><small>{template.recurrence_type} · {template.start_date}</small></span><span class="row"><button class="secondary" onclick={() => editRecurring(template)}>Edit</button><button class="secondary" onclick={() => { void setRecurringTemplateActive(template.id, !template.active).then(() => listRecurringTemplates().then(v => recurring = v)); }}>{template.active ? "Stop" : "Stopped"}</button></span></li>{/each}</ul>{/if}
   </section>
   <StudyCapacitySettings />
 
