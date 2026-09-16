@@ -59,19 +59,8 @@ pub fn run() {
             desktop::setup(app.handle())?;
             reminders::setup(app.handle());
 
-            let app_handle = app.handle().clone();
-            std::thread::spawn(move || {
-                std::thread::sleep(std::time::Duration::from_secs(2));
-                match todoist::get_token() {
-                    Ok(Some(_)) => {
-                        if let Err(error) = todoist::sync::sync_now(&app_handle.state::<Db>()) {
-                            eprintln!("Startup Todoist sync: {error}");
-                        }
-                    }
-                    Ok(None) => {}
-                    Err(_) => eprintln!("Startup Todoist sync: keychain unavailable"),
-                }
-            });
+            // Todoist is intentionally opt-in at runtime. Avoid reading the OS
+            // keychain during startup; users can sync explicitly from Settings.
 
             Ok(())
         })
