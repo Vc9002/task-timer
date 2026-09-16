@@ -87,7 +87,7 @@ impl TodoistClient {
         })
     }
 
-    /// Read resources only: no Todoist write commands are submitted.
+    /// Read resources from the incremental Sync API.
     /// Sync returns a full snapshot or cursor-based deltas, not paginated REST lists.
     pub fn fetch(&self, cursor: &str) -> Result<RemoteSync, TodoistApiError> {
         let mut form = reqwest::Url::parse("https://localhost/")
@@ -121,6 +121,55 @@ impl TodoistClient {
 
     pub fn test_connection(&self) -> Result<(), TodoistApiError> {
         self.fetch("*").map(|_| ())
+    }
+
+    pub fn complete_tasks(&self, commands: &[serde_json::Value]) -> Result<(), TodoistApiError> {
+        if commands.is_empty() {
+            return Ok(());
+        }
+        let mut form = reqwest::Url::parse("https://localhost/")
+            .map_err(|_| TodoistApiError::InvalidResponse)?;
+        form.query_pairs_mut()
+            .append_pair("sync_token", "*")
+            .append_pair(
+                "commands",
+                &serde_json::to_string(commands).map_err(|_| TodoistApiError::InvalidResponse)?,
+            );
+        let response = self
+            .http
+            .post(format!("{}/sync", self.base))
+            .bearer_auth(&self.token)
+            .header(
+                reqwest::header::CONTENT_TYPE,
+                "application/x-www-form-urlencoded",
+            )
+            .body(form.query().unwrap_or_default().to_owned())
+            .send()
+            .map_err(|_| TodoistApiError::Network)?;
+        match response.status().as_u16() {
+            200 => {}
+            401 | 403 => return Err(TodoistApiError::InvalidToken),
+            429 => return Err(TodoistApiError::RateLimited),
+            _ => return Err(TodoistApiError::Network),
+        }
+        let body: serde_json::Value = response
+            .json()
+            .map_err(|_| TodoistApiError::InvalidResponse)?;
+        for command in commands {
+            let uuid = command
+                .get("uuid")
+                .and_then(|v| v.as_str())
+                .ok_or(TodoistApiError::InvalidResponse)?;
+            let status = body
+                .get("sync_status")
+                .and_then(|v| v.get(uuid))
+                .and_then(|v| v.get("code"))
+                .and_then(|v| v.as_i64());
+            if status != Some(0) {
+                return Err(TodoistApiError::InvalidResponse);
+            }
+        }
+        Ok(())
     }
 }
 

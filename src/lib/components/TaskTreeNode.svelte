@@ -1,6 +1,6 @@
 <script lang="ts">
   import TaskTreeNode from "./TaskTreeNode.svelte";
-  import { scheduleTask, setTaskStatus, updateTask, type TaskRecord } from "$lib/api";
+  import { completeTodoistTask, scheduleTask, setTaskStatus, updateTask, type TaskRecord } from "$lib/api";
   import { timerStore } from "$lib/stores/timer.svelte";
   import { formatDurationShort, localDate } from "$lib/format";
   import Icon from "./Icon.svelte";
@@ -31,14 +31,18 @@
     if (!editTitle.trim()) return;
     if (await change(() => updateTask({ id: task.id, title: editTitle.trim(), description: task.description, priority: editPriority, due_at: editDue || null, scheduled_date: task.scheduled_date, estimated_minutes: editEstimate ? Number(editEstimate) : null }))) editing = false;
   }
+  async function complete() {
+    if (task.source === "todoist") await change(() => completeTodoistTask(task.id));
+    else await change(() => setTaskStatus(task.id, task.status === "completed" ? "not_started" : "completed"));
+  }
   function tomorrow() { const d = new Date(); d.setDate(d.getDate() + 1); return localDate(d); }
 </script>
 <li>
   <div class="task-row" class:context={task.context_only} class:tracking={timerStore.active?.session.task_id === task.id}>
     <input type="checkbox" aria-label={`Complete ${task.title}`} checked={task.status === "completed"}
-      disabled={busy || task.source === "todoist"}
-      title={task.source === "todoist" ? "Complete in Todoist, then sync" : "Complete task"}
-      onchange={() => change(() => setTaskStatus(task.id, task.status === "completed" ? "not_started" : "completed"))} />
+      disabled={busy || (task.source === "todoist" && task.status === "completed")}
+      title={task.source === "todoist" ? "Complete in Todoist" : "Complete task"}
+      onchange={complete} />
     <span class="title" class:done={task.status === "completed"}>{task.title}
       <span class="badges">
       {#if task.source === "todoist"}<small title="Complete and edit deadlines in Todoist, then sync">Todoist</small>{/if}

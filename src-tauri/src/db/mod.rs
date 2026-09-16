@@ -23,6 +23,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "0005_recurring_tasks",
         include_str!("migrations/0005_recurring_tasks.sql"),
     ),
+    (
+        "0006_todoist_outbox",
+        include_str!("migrations/0006_todoist_outbox.sql"),
+    ),
 ];
 
 pub fn open(app_data_dir: &Path) -> rusqlite::Result<Connection> {

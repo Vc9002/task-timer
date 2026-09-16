@@ -20,8 +20,8 @@ use commands::tasks::{
 };
 use commands::today::get_today;
 use commands::todoist::{
-    disconnect_todoist, get_todoist_status, list_todoist_project_mappings, map_todoist_project,
-    set_todoist_token, sync_todoist_now,
+    complete_todoist_task, disconnect_todoist, get_todoist_status, list_todoist_project_mappings,
+    map_todoist_project, set_todoist_token, sync_todoist_now,
 };
 use commands::week::{get_study_capacity, get_week, set_study_capacity};
 use db::Db;
@@ -138,6 +138,7 @@ pub fn run() {
             list_todoist_project_mappings,
             map_todoist_project,
             sync_todoist_now,
+            complete_todoist_task,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

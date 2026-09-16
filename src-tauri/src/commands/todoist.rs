@@ -111,3 +111,20 @@ pub async fn sync_todoist_now(app: tauri::AppHandle) -> Result<SyncResult, Strin
             "Todoist sync couldn't finish. Your local tasks and timer still work.".to_string()
         })?
 }
+
+#[tauri::command]
+pub async fn complete_todoist_task(app: tauri::AppHandle, task_id: i64) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let db = app.state::<Db>();
+        {
+            let conn = db.0.lock().map_err(|_| "Couldn't access local tasks")?;
+            crate::todoist::sync::queue_completion(&conn, task_id)?;
+        }
+        // Local completion is durable even while Todoist is offline. The queued
+        // command is retried by the next explicit or startup sync.
+        let _ = crate::todoist::sync::flush_outbox(&db);
+        Ok::<(), String>(())
+    })
+    .await
+    .map_err(|_| "Couldn't complete the Todoist task.".to_string())?
+}

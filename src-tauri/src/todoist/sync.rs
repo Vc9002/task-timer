@@ -4,6 +4,7 @@ use rusqlite::{Connection, OptionalExtension};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, MutexGuard};
+use uuid::Uuid;
 
 // Serializes sync and credential changes, independently of the SQLite mutex.
 static SYNC_GATE: Mutex<()> = Mutex::new(());
@@ -26,7 +27,7 @@ pub struct SyncResult {
 pub fn sync_now(db: &Db) -> Result<SyncResult, String> {
     let _gate = gate()?;
     let token = super::get_token()?.ok_or("No Todoist token configured")?;
-    sync_with(db, |cursor| {
+    let result = sync_with(db, |cursor| {
         let client = TodoistClient::new(token).map_err(|e| e.to_string())?;
         let first = client.fetch(cursor).map_err(|e| e.to_string())?;
         if first.full_sync {
@@ -36,7 +37,74 @@ pub fn sync_now(db: &Db) -> Result<SyncResult, String> {
         } else {
             Ok(vec![first])
         }
-    })
+    })?;
+    flush_outbox(db)?;
+    Ok(result)
+}
+
+pub fn queue_completion(conn: &Connection, task_id: i64) -> Result<(), String> {
+    let (external_id, source): (Option<String>, String) = conn
+        .query_row(
+            "SELECT external_id,source FROM tasks WHERE id=?1",
+            [task_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .map_err(|_| "Task not found")?;
+    if source != "todoist" || external_id.is_none() {
+        return Err("This task is not a Todoist task.".into());
+    }
+    let external_id = external_id.unwrap();
+    let already_queued: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM integration_outbox WHERE external_id=?1 AND status IN ('pending','sending','completed'))", [&external_id], |r| r.get(0)).map_err(|_| "Couldn't inspect Todoist completion")?;
+    if already_queued {
+        return Ok(());
+    }
+    let uuid = Uuid::new_v4().to_string();
+    let payload = serde_json::json!({"type":"item_complete","uuid":uuid,"args":{"id":external_id}});
+    conn.execute("INSERT INTO integration_outbox(provider,entity_type,external_id,command_uuid,command_type,payload_json) VALUES('todoist','task',?1,?2,'item_complete',?3)", rusqlite::params![external_id, uuid, payload.to_string()]).map_err(|_| "Couldn't queue Todoist completion")?;
+    conn.execute("UPDATE tasks SET status='completed',completed_at=datetime('now'),updated_at=datetime('now') WHERE id=?1", [task_id]).map_err(|_| "Couldn't save task completion")?;
+    Ok(())
+}
+
+pub fn flush_outbox(db: &Db) -> Result<(), String> {
+    let token = super::get_token()?.ok_or("No Todoist token configured")?;
+    let entries: Vec<(i64, String, String)> = {
+        let conn = db.0.lock().map_err(database_error)?;
+        let result = conn.prepare("SELECT id,command_uuid,payload_json FROM integration_outbox WHERE status IN ('pending','failed') ORDER BY id").map_err(database_error)?.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).map_err(database_error)?.collect::<Result<_,_>>().map_err(database_error)?;
+        result
+    };
+    if entries.is_empty() {
+        return Ok(());
+    }
+    let commands: Vec<serde_json::Value> = entries
+        .iter()
+        .map(|(_, _, payload)| {
+            serde_json::from_str(payload).map_err(|_| "Invalid queued Todoist command".to_string())
+        })
+        .collect::<Result<_, _>>()?;
+    {
+        let conn = db.0.lock().map_err(database_error)?;
+        for (id, _, _) in &entries {
+            conn.execute("UPDATE integration_outbox SET status='sending',attempts=attempts+1,updated_at=datetime('now') WHERE id=?1", [id]).map_err(database_error)?;
+        }
+    }
+    let client = TodoistClient::new(token).map_err(|e| e.to_string())?;
+    match client.complete_tasks(&commands) {
+        Ok(()) => {
+            let conn = db.0.lock().map_err(database_error)?;
+            for (id, _, _) in &entries {
+                conn.execute("UPDATE integration_outbox SET status='completed',updated_at=datetime('now') WHERE id=?1", [id]).map_err(database_error)?;
+            }
+            Ok(())
+        }
+        Err(error) => {
+            let conn = db.0.lock().map_err(database_error)?;
+            let message = error.to_string();
+            for (id, _, _) in &entries {
+                conn.execute("UPDATE integration_outbox SET status='failed',last_error=?1,updated_at=datetime('now') WHERE id=?2", rusqlite::params![message,id]).map_err(database_error)?;
+            }
+            Err(message)
+        }
+    }
 }
 
 fn sync_with(
@@ -384,5 +452,32 @@ mod tests {
                 .unwrap(),
             "unknown"
         );
+    }
+    #[test]
+    fn completion_is_persisted_with_stable_command_and_local_status() {
+        let conn = test_connection();
+        seed(&conn);
+        conn.execute("INSERT INTO tasks(id,class_id,title,source,external_id,todoist_project_id) VALUES(1,1,'Remote','todoist','remote-1','p')", []).unwrap();
+        queue_completion(&conn, 1).unwrap();
+        queue_completion(&conn, 1).unwrap();
+        assert_eq!(
+            conn.query_row("SELECT status FROM tasks WHERE id=1", [], |r| r
+                .get::<_, String>(0))
+                .unwrap(),
+            "completed"
+        );
+        assert_eq!(
+            conn.query_row("SELECT count(*) FROM integration_outbox", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        let payload: String = conn
+            .query_row("SELECT payload_json FROM integration_outbox", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert!(payload.contains("item_complete"));
+        assert!(payload.contains("remote-1"));
     }
 }

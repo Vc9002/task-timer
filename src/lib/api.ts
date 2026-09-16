@@ -370,6 +370,9 @@ export function mapTodoistProject(todoistId: string, classId: number | null): Pr
 export function syncTodoistNow(): Promise<SyncResult> {
   return invoke("sync_todoist_now");
 }
+export function completeTodoistTask(taskId: number): Promise<void> {
+  return invoke("complete_todoist_task", { taskId });
+}
 
 export function switchTimer(sessionId: number, taskId: number): Promise<ActiveSessionInfo> {
   return invoke("switch_timer", { sessionId, taskId });

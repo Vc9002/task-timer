@@ -85,8 +85,10 @@ history, to that class. Unmapped remote tasks are cached locally for later mappi
 
 API behavior: https://developer.todoist.com/api/v1/#tag/Sync
 
-Todoist integration is currently read-only: changes made in the app are not
-pushed back to Todoist.
+Todoist task completion can be changed in TaskTimer. Completion is saved
+locally first and queued in a durable outbox; the command is retried on the
+next explicit or startup sync if Todoist is unavailable. Other Todoist fields
+remain read-only and are owned by Todoist.
 
 ## Testing
 
