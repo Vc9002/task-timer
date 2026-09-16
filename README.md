@@ -134,7 +134,8 @@ Tray contents update only on timer transitions, with no elapsed-time polling.
 Global shortcuts default to Cmd/Ctrl+Shift+T (task picker),
 Cmd/Ctrl+Shift+Space (pause/resume), and Cmd/Ctrl+Shift+F (finish).
 Change them in Settings, or leave a shortcut blank to disable it. Cmd/Ctrl+K
-opens Quick Add inside the app; due date and planned study date are separate,
+opens the command palette for searching tasks/classes, jumping to views,
+starting work, or opening Quick Add; due date and planned study date are separate,
 and an incomplete local task in the same class can be selected as parent.
 
 Login autostart is off by default. Optional hidden startup applies only to

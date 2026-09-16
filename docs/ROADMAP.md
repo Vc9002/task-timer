@@ -15,9 +15,14 @@ Still intentionally deferred: Canvas import, full Todoist field write-back,
 advanced analytics, automatic scheduling, and AI. These are separate releases
 and must not be mixed into the stabilization work.
 
-## v0.3.3 — Productivity workflow pass (next)
+## v0.3.3 — Productivity workflow pass (in progress)
 
-Planned in controlled slices: command palette and universal search, Inbox,
+The first slice is complete: Cmd/Ctrl+K opens a keyboard-accessible command
+palette that searches active local tasks and classes, navigates to app views,
+starts a task, or opens Quick Add. It uses existing local commands and adds no
+new persistence surface.
+
+Remaining slices are planned in controlled order: Inbox,
 recurring-template editing, Week parent breadcrumbs, interactive Calendar
 rescheduling, task types and tags, duplicate/undo actions, time budgets,
 Focus Mode, and a compact menu-bar elapsed display. Each slice requires its

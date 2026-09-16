@@ -8,9 +8,11 @@
   import { invoke } from "@tauri-apps/api/core";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import TaskPicker from "$lib/components/TaskPicker.svelte";
+  import CommandPalette from "$lib/components/CommandPalette.svelte";
   import Icon from "$lib/components/Icon.svelte";
   import "$lib/app.css";
   let pickerOpen = $state(false);
+  let commandPaletteOpen = $state(false);
 
   let { children } = $props();
 
@@ -73,12 +75,19 @@
   async function openQuickAdd() {
     quickAddOpen = true;
   }
+
+  function openCommandPalette() {
+    commandPaletteOpen = true;
+  }
 </script>
 
 {#if pickerOpen}<TaskPicker onclose={() => pickerOpen = false} />{/if}
+{#if commandPaletteOpen}
+  <CommandPalette onclose={() => commandPaletteOpen = false} onquickadd={openQuickAdd} onstart={() => pickerOpen = true} />
+{/if}
 
 <svelte:window onkeydown={(event) => {
-  if (!event.repeat && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); void openQuickAdd(); }
+  if (!event.repeat && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); openCommandPalette(); }
 }} />
 
 {#if quickAddOpen}
@@ -114,7 +123,7 @@
 <div class="shell">
   <aside class="sidebar">
     <a href="/" class="brand"><span class="brand-icon"><Icon name="clock" size={21} /></span>TaskTimer</a>
-    <button class="quick-add" onclick={openQuickAdd}><Icon name="plus" size={16} /> Add task <kbd>⌘ / Ctrl K</kbd></button>
+    <button class="quick-add" onclick={openCommandPalette}><Icon name="search" size={16} /> Search &amp; commands <kbd>⌘ / Ctrl K</kbd></button>
     <nav aria-label="Main navigation">
     {#each links as link}
       <a href={link.href} class:active={$page.url.pathname === link.href} aria-current={$page.url.pathname === link.href ? "page" : undefined}><Icon name={link.icon} />{link.label}</a>
