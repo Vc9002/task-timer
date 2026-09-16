@@ -58,7 +58,10 @@
   </form>
 </Modal>
 <style>
-  fieldset { border: 0; padding: 0; }
-  label { display: block; margin: .6rem 0; }
-  input, select { display: block; width: 100%; padding: .45rem; box-sizing: border-box; }
+fieldset { border: 0; padding: 0; margin: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  label { display: block; margin: 0; }
+  label:first-child, label:last-of-type { grid-column: 1 / -1; }
+  input, select { display: block; width: 100%; }
+  button { grid-column: 1 / -1; margin-top: 10px; }
+  fieldset p { grid-column: 1 / -1; font-size: 12px; color: var(--muted); }
 </style>

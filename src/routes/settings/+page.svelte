@@ -90,6 +90,7 @@
 
 <main class="container">
   <h1>Settings</h1>
+  <p class="page-intro">Make TaskTimer work the way you do.</p>
   <DesktopSettings />
 
   {#if error}<p class="error">{error}</p>{/if}
@@ -112,7 +113,7 @@
         {#each mappings as m (m.todoist_id)}
           <li>
             <span class="name">{m.name}</span>
-            <select value={m.class_id ?? ""} onchange={(e) => updateMapping(m.todoist_id, (e.target as HTMLSelectElement).value)}>
+            <select aria-label={`Class for ${m.name}`} value={m.class_id ?? ""} onchange={(e) => updateMapping(m.todoist_id, (e.target as HTMLSelectElement).value)}>
               <option value="">Unmapped</option>
               {#each classes as c (c.id)}
                 <option value={c.id}>{c.course_code}</option>
@@ -129,6 +130,7 @@
       <form class="row" onsubmit={connect}>
         <input
           type="password"
+          aria-label="Todoist API token"
           placeholder="Todoist API token"
           bind:value={token}
         />
@@ -143,104 +145,14 @@
 </main>
 
 <style>
-  .container {
-    max-width: 640px;
-    margin: 0 auto;
-    padding: 2.5rem 1.5rem;
-  }
-
-  section {
-    margin-bottom: 2rem;
-  }
-
-  h2 {
-    font-size: 1.1em;
-    border-bottom: 1px solid #e5e5e5;
-    padding-bottom: 0.4rem;
-  }
-
-  .status {
-    font-weight: 600;
-  }
-
-  .status.connected {
-    color: #2e7d32;
-  }
-
-  .row {
-    display: flex;
-    gap: 0.5rem;
-    margin: 0.75rem 0;
-  }
-
-  input,
-  select {
-    flex: 1;
-    padding: 0.5em 0.75em;
-    border-radius: 6px;
-    border: 1px solid #ccc;
-  }
-
-  button {
-    padding: 0.5em 1em;
-    border-radius: 6px;
-    border: 1px solid transparent;
-    background: #396cd8;
-    color: white;
-    cursor: pointer;
-  }
-
-  button.secondary {
-    background: #e5e5e5;
-    color: #333;
-  }
-
-  .mappings {
-    list-style: none;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 0.4rem;
-  }
-
-  .mappings li {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    padding: 0.5em 0.7em;
-    background: white;
-    border-radius: 6px;
-    border: 1px solid #ececec;
-  }
-
-  .mappings .name {
-    flex: 1;
-  }
-
-  .muted {
-    color: #888;
-    font-size: 0.9em;
-  }
-
-  .empty {
-    color: #888;
-    font-style: italic;
-  }
-
-  .error {
-    color: #b00020;
-  }
-
-  @media (prefers-color-scheme: dark) {
-    .mappings li {
-      background: #3a3a3a;
-      border-color: #4a4a4a;
-    }
-    input,
-    select {
-      background: #2a2a2a;
-      color: #f6f6f6;
-      border-color: #555;
-    }
-  }
+section { margin-bottom: 2rem; border-top: 1px solid var(--line); padding-top: 12px; }
+  h2 { margin-top: 12px; }
+  .status { font-size: 12px; font-weight: 600; }
+  .status.connected { color: var(--accent); }
+  .row { display: flex; gap: 8px; margin: 12px 0; }
+  input, select { flex: 1; }
+  .mappings { list-style: none; padding: 0; }
+  .mappings li { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .mappings .name { flex: 1; }
+  .muted { color: var(--muted); font-size: 12px; }
 </style>

@@ -73,9 +73,13 @@
   {#if message}<p role="status">{message}</p>{/if}
 </section>
 <style>
-  section { margin-bottom: 2rem; }
-  fieldset { border: 0; padding: 0; }
-  label { display: block; margin: .65rem 0; }
-  input:not([type=checkbox]), select { display: block; padding: .4rem; min-width: 19rem; }
-  p { font-size: .85rem; max-width: 40rem; }
+section { margin-bottom: 2rem; }
+  fieldset { border: 0; padding: 0; margin: 0; }
+  h2, h3 { border-top: 1px solid var(--line); padding-top: 20px; margin-top: 25px; }
+  label { display: block; margin: 14px 0; font-size: 12px; }
+  label:has(input[type=checkbox]) { display: flex; align-items: center; gap: 8px; }
+  input:not([type=checkbox]), select { display: block; margin-top: 6px; width: 100%; max-width: 360px; }
+  p { color: var(--muted); font-size: 11px; max-width: 44rem; line-height: 1.7; }
+  button { margin: 3px 4px 3px 0; font-size: 12px; }
+  [role=status] { padding: 10px 12px; background: var(--accent-soft); color: var(--accent); border-radius: 6px; position: sticky; bottom: 10px; }
 </style>

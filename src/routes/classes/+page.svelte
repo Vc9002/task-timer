@@ -161,7 +161,7 @@
 
   onMount(() => {
     void refresh();
-    const reload = () => { if (expanded !== null) void listTasksForClass(expanded).then(tasks => { if (expanded !== null) tasksByClass[expanded] = tasks; }); };
+    const reload = () => { const id = expanded; if (id !== null) void listTasksForClass(id).then(tasks => { tasksByClass[id] = tasks; }).catch(() => error = "Couldn't refresh tasks. Try reopening the class."); };
     window.addEventListener("tasks-changed", reload);
     return () => window.removeEventListener("tasks-changed", reload);
   });
@@ -170,15 +170,16 @@
 
 <main class="container">
   <h1>Classes</h1>
+  <p class="page-intro">Keep coursework and subtasks together.</p>
 
   {#if error}
     <p class="error">{error}</p>
   {/if}
 
   <form class="row" onsubmit={addClass}>
-    <input placeholder="Course code (e.g. LGST 1000)" bind:value={courseCode} />
-    <input placeholder="Full name (optional)" bind:value={name} />
-    <input placeholder="Semester (e.g. Fall 2026)" bind:value={semester} />
+    <input aria-label="Course code" required placeholder="Course code · LGST 1000" bind:value={courseCode} />
+    <input aria-label="Class name" placeholder="Class name (optional)" bind:value={name} />
+    <input aria-label="Semester" required placeholder="Semester · Fall 2026" bind:value={semester} />
     <button type="submit">Add class</button>
   </form>
 
@@ -207,10 +208,10 @@
         {#if expanded === c.id}
           <div class="tasks">
             <form class="row" onsubmit={(e) => addTask(c.id, e)}>
-              <input placeholder="Task title" bind:value={taskTitle} />
-              <input type="date" bind:value={taskDue} />
-              <input placeholder="Est. minutes" type="number" bind:value={taskEstimate} />
-              <select bind:value={taskParentId}>
+              <input aria-label="Task title" required placeholder="Add a task…" bind:value={taskTitle} />
+              <input aria-label="Due date" type="date" bind:value={taskDue} />
+              <input aria-label="Estimated minutes" placeholder="Est. minutes" type="number" min="0" bind:value={taskEstimate} />
+              <select aria-label="Parent task" bind:value={taskParentId}>
                 <option value={null}>No parent</option>
                 {#each (tasksByClass[c.id] ?? []).filter((t) => t.source === "local" && t.status !== "completed") as parent}
                   <option value={parent.id}>{parent.title}</option>
@@ -266,166 +267,20 @@
 </main>
 
 <style>
-  .container {
-    margin: 0 auto;
-    max-width: 720px;
-    padding: 3rem 1.5rem;
-  }
-
-  h1 {
-    margin-bottom: 1.5rem;
-  }
-
-  .row {
-    display: flex;
-    gap: 0.5rem;
-    margin-bottom: 1rem;
-    flex-wrap: wrap;
-  }
-
-  input,
-  select {
-    flex: 1;
-    min-width: 100px;
-    padding: 0.5em 0.75em;
-    border-radius: 6px;
-    border: 1px solid #ccc;
-  }
-
-  button {
-    padding: 0.5em 1em;
-    border-radius: 6px;
-    border: 1px solid transparent;
-    background: #396cd8;
-    color: white;
-    cursor: pointer;
-  }
-
-  .class-list {
-    list-style: none;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-  }
-
-  .class-header {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    padding: 0.6em 0.9em;
-    background: white;
-    border-radius: 6px;
-    border: 1px solid #e5e5e5;
-    cursor: pointer;
-  }
-
-  .class-header button {
-    margin-left: auto;
-    background: #e5e5e5;
-    color: #333;
-  }
-
-  .class-header button + button {
-    margin-left: 0;
-  }
-
-  .class-header.editing {
-    cursor: default;
-  }
-
-  button.secondary {
-    background: #e5e5e5;
-    color: #333;
-  }
-
-  .history-panel {
-    margin-left: 1.5rem;
-    padding: 0.5rem 0.75rem;
-    background: white;
-    border-radius: 6px;
-    border: 1px dashed #ccc;
-    display: flex;
-    flex-direction: column;
-    gap: 0.4rem;
-  }
-
-  .history-summary {
-    display: flex;
-    gap: 1rem;
-    font-size: 0.85em;
-    color: #555;
-  }
-
-  .history-sessions {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 0.2rem;
-  }
-
-  .history-sessions li {
-    display: flex;
-    justify-content: space-between;
-    font-size: 0.85em;
-    color: #777;
-  }
-
-  .code {
-    font-weight: 600;
-  }
-
-  .semester {
-    color: #666;
-    font-size: 0.9em;
-  }
-
-  .tasks {
-    padding: 0.75rem 1rem;
-    background: #fafafa;
-    border: 1px solid #ececec;
-    border-top: none;
-    border-radius: 0 0 6px 6px;
-  }
-
-  .task-list {
-    list-style: none;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 0.3rem;
-  }
-
-  .task-list li {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.35em 0.4em;
-  }
-
-  .empty {
-    color: #888;
-    font-style: italic;
-  }
-
-  .error {
-    color: #b00020;
-  }
-
-  @media (prefers-color-scheme: dark) {
-    .class-header,
-    .tasks,
-    .history-panel {
-      background: #3a3a3a;
-      border-color: #4a4a4a;
-    }
-    input,
-    select {
-      background: #2a2a2a;
-      color: #f6f6f6;
-      border-color: #555;
-    }
-  }
+.row { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
+  .row input, .row select { flex: 1; min-width: 115px; }
+  .class-list { list-style: none; padding: 0; display: grid; gap: 16px; margin-top: 25px; }
+  .class-list > li:not(.empty) { border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+  .class-header { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; padding: 14px; }
+  .class-header .code { font-size: 12px; font-weight: 650; }
+  .class-header .name { color: var(--muted); font-size: 12px; flex: 1; }
+  .semester { color: var(--muted); font-size: 11px; margin-left: auto; }
+  .class-header button { padding: 3px 8px; min-height: 26px; font-size: 11px; }
+  .class-header.editing input { min-width: 100px; flex: 1; }
+  .tasks { padding: 0 16px 16px; border-top: 1px solid var(--line); }
+  .task-list { padding: 0; list-style: none; }
+  .history-panel { padding: 12px; margin-top: 12px; background: var(--hover); border-radius: 6px; }
+  .history-summary { display: flex; flex-wrap: wrap; gap: 14px; color: var(--muted); font-size: 12px; }
+  .history-sessions { list-style: none; padding: 0; }
+  .history-sessions li { display: flex; justify-content: space-between; font-size: 12px; padding-top: 6px; }
 </style>

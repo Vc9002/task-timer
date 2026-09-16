@@ -57,10 +57,12 @@
 </script>
 
 <main class="container">
+  <h1>History</h1>
+  <p class="page-intro">A record of where your time went.</p>
   <div class="header">
-    <button onclick={() => shiftDay(-1)}>&larr;</button>
-    <h1>{new Date(date + "T00:00:00").toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}</h1>
-    <button onclick={() => shiftDay(1)}>&rarr;</button>
+    <button aria-label="Previous day" onclick={() => shiftDay(-1)}>&larr;</button>
+    <h2>{new Date(date + "T00:00:00").toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}</h2>
+    <button aria-label="Next day" onclick={() => shiftDay(1)}>&rarr;</button>
   </div>
 
   {#if error}<p class="error">{error}</p>{/if}
@@ -82,13 +84,13 @@
           <span class="course">{s.course_code}</span>
           <span class="task">{s.task_title}</span>
           {#if editingId === s.session_id}
-            <input type="number" bind:value={editMinutes} class="edit-input" />
+            <input aria-label="Session duration in minutes" type="number" min="0" bind:value={editMinutes} class="edit-input" />
             <span>min</span>
             <button onclick={() => saveEdit(s.session_id)}>Save</button>
             <button onclick={() => (editingId = null)}>Cancel</button>
           {:else}
             <span class="duration">{formatDurationShort(s.duration_seconds)}</span>
-            <button class="edit" onclick={() => startEdit(s.session_id, s.duration_seconds)}>Edit</button>
+            {#if s.end_ts}<button class="edit" aria-label={`Edit duration for ${s.task_title}`} onclick={() => startEdit(s.session_id, s.duration_seconds)}>Edit</button>{:else}<span class="time">In progress</span>{/if}
           {/if}
         </li>
       {/each}
@@ -100,118 +102,16 @@
 </main>
 
 <style>
-  .container {
-    max-width: 720px;
-    margin: 0 auto;
-    padding: 2.5rem 1.5rem;
-  }
-
-  .header {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-    margin-bottom: 0.5rem;
-  }
-
-  .header h1 {
-    margin: 0;
-    font-size: 1.3em;
-    flex: 1;
-    text-align: center;
-  }
-
-  .header button {
-    background: #e5e5e5;
-    color: #333;
-    border: none;
-    border-radius: 6px;
-    padding: 0.3em 0.7em;
-    cursor: pointer;
-  }
-
-  .total {
-    font-weight: 600;
-    margin-bottom: 1rem;
-  }
-
-  .by-class,
-  .sessions {
-    list-style: none;
-    padding: 0;
-    margin: 0 0 1.5rem;
-    display: flex;
-    flex-direction: column;
-    gap: 0.35rem;
-  }
-
-  .by-class li {
-    display: flex;
-    justify-content: space-between;
-    padding: 0.4em 0.6em;
-    background: white;
-    border-radius: 6px;
-    border: 1px solid #ececec;
-  }
-
-  .sessions li {
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-    padding: 0.5em 0.6em;
-    background: white;
-    border-radius: 6px;
-    border: 1px solid #ececec;
-    font-size: 0.92em;
-  }
-
-  .time {
-    color: #888;
-    min-width: 130px;
-  }
-
-  .course {
-    font-weight: 600;
-  }
-
-  .task {
-    flex: 1;
-  }
-
-  .duration {
-    font-variant-numeric: tabular-nums;
-  }
-
-  .edit,
-  button {
-    padding: 0.3em 0.7em;
-    border-radius: 6px;
-    border: 1px solid transparent;
-    background: #e5e5e5;
-    color: #333;
-    cursor: pointer;
-  }
-
-  .edit-input {
-    width: 60px;
-    padding: 0.2em 0.4em;
-    border-radius: 4px;
-    border: 1px solid #ccc;
-  }
-
-  .empty {
-    color: #888;
-    font-style: italic;
-  }
-
-  .error {
-    color: #b00020;
-  }
-
-  @media (prefers-color-scheme: dark) {
-    .by-class li,
-    .sessions li {
-      background: #3a3a3a;
-      border-color: #4a4a4a;
-    }
-  }
+.header { display: flex; align-items: center; gap: 12px; margin: 22px 0; }
+  .header h2 { flex: 1; text-align: center; margin: 0; font-size: 14px; }
+  .total { color: var(--muted); font-size: 13px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+  .by-class, .sessions { list-style: none; padding: 0; margin: 0 0 26px; }
+  .by-class li { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+  .sessions li { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 14px 0; border-bottom: 1px solid var(--line); font-size: 12px; }
+  .time { color: var(--muted); min-width: 110px; font-size: 11px; }
+  .course { font-size: 10px; color: var(--accent); background: var(--accent-soft); padding: 2px 5px; border-radius: 4px; font-weight: 600; }
+  .task { flex: 1; min-width: 110px; }
+  .duration { font-variant-numeric: tabular-nums; font-weight: 600; }
+  .edit { min-height: 25px; font-size: 11px; padding: 2px 7px; }
+  .edit-input { width: 70px; }
 </style>

@@ -10,7 +10,9 @@
   let selected = $state(0);
   let error = $state("");
   let loading = $state(true);
+  let resultsElement: HTMLDivElement;
   let results = $derived(tasks.filter(t => `${t.title} ${t.course_code} ${t.class_name ?? ""}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())));
+  $effect(() => { const index = selected; resultsElement?.querySelector(`[data-index="${index}"]`)?.scrollIntoView({ block: "nearest" }); });
   onMount(() => { void invoke<Task[]>("list_startable_tasks").then(value => tasks = value).catch(() => error = "Couldn't load tasks. Close and try again.").finally(() => loading = false); });
   async function start(task: Task) {
     await timerStore.start(task.id, `${task.course_code} — ${task.title}`);
@@ -25,18 +27,19 @@
     }} />
   </label>
   <p class="hint">↑ ↓ choose · Enter start · Esc close</p>
-  <div class="results">
+  <div class="results" bind:this={resultsElement}>
     {#each results as task, i (task.id)}
-      <button class:selected={i === selected} disabled={timerStore.busy} onclick={() => start(task)}><small>{task.course_code}</small> {task.title}</button>
+      <button data-index={i} class:selected={i === selected} aria-pressed={i === selected} disabled={timerStore.busy} onclick={() => start(task)}><small>{task.course_code}</small> {task.title}</button>
     {:else}<p>{loading ? "Loading…" : "No incomplete tasks found."}</p>{/each}
   </div>
   {#if error || timerStore.error}<p role="alert">{error || timerStore.error}</p>{/if}
 </Modal>
 <style>
-  input { display: block; width: 100%; box-sizing: border-box; padding: .6rem; }
-  .hint { font-size: .8rem; color: #777; }
+input { display: block; width: 100%; margin-top: 6px; }
+  label { font-size: 12px; color: var(--muted); }
+  .hint { font-size: 10px; color: var(--muted); margin: 10px 0 15px; }
   .results { max-height: 45vh; overflow: auto; }
-  button { display: block; width: 100%; text-align: left; padding: .7rem; border: 1px solid transparent; background: transparent; color: inherit; }
-  button.selected { border-color: #396cd8; }
-  small { display: block; color: #777; }
+  button { display: block; width: 100%; text-align: left; padding: 12px; border: 1px solid transparent; background: transparent; color: var(--text); margin-bottom: 4px; }
+  button.selected { background: var(--accent-soft); border-color: var(--accent); }
+  small { display: block; font-size: 10px; margin-bottom: 4px; color: var(--muted); font-weight: 500; }
 </style>

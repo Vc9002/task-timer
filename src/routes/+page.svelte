@@ -27,7 +27,7 @@
 
 <main class="container">
   <header>
-    <h1>Today</h1>
+    <div><p class="eyebrow">Your coursework</p><h1>Today</h1></div>
     <span class="date">{todayDate}</span>
   </header>
 
@@ -37,9 +37,9 @@
 
   {#if today}
     <div class="summary">
-      <span>{today.task_count} tasks</span>
-      <span>Estimated: {formatDurationShort(today.estimated_minutes_total * 60)}</span>
-      <span>Tracked: {formatDurationShort(today.tracked_seconds_total)}</span>
+      <span><strong>{today.task_count}</strong>Tasks to work on</span>
+      <span><strong>{formatDurationShort(today.estimated_minutes_total * 60)}</strong>Estimated</span>
+      <span><strong>{formatDurationShort(today.tracked_seconds_total)}</strong>Tracked today</span>
     </div>
 
     {#each today.groups as group (group.class_id)}
@@ -54,72 +54,22 @@
     {/each}
 
     {#if today.groups.length === 0}
-      <p class="empty">Nothing on Today. Add a task in Classes, or check Todoist sync in Settings.</p>
+      <div class="empty"><strong>A clear day ahead.</strong><p>Add a task with Cmd/Ctrl+K, or schedule existing coursework for today.</p><a href="/classes">Browse your classes →</a></div>
     {/if}
-  {/if}
+  {:else if !error}<p class="page-intro" role="status">Loading today's work…</p>{/if}
 </main>
 
 <style>
-  .container {
-    max-width: 720px;
-    margin: 0 auto;
-    padding: 2.5rem 1.5rem;
-  }
-
-  header {
-    display: flex;
-    align-items: baseline;
-    gap: 0.75rem;
-    margin-bottom: 0.5rem;
-  }
-
-  h1 {
-    margin: 0;
-  }
-
-  .date {
-    color: #888;
-  }
-
-  .summary {
-    display: flex;
-    gap: 1.25rem;
-    color: #666;
-    margin-bottom: 1.5rem;
-    font-size: 0.95em;
-  }
-
-  .class-group {
-    margin-bottom: 1.75rem;
-  }
-
-  .class-group h2 {
-    font-size: 1em;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    color: #666;
-    border-bottom: 1px solid #e5e5e5;
-    padding-bottom: 0.4rem;
-    margin-bottom: 0.5rem;
-  }
-
-  ul {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 0.35rem;
-  }
-
-  .empty {
-    color: #888;
-    font-style: italic;
-  }
-
-  .error {
-    color: #b00020;
-  }
-
-  @media (prefers-color-scheme: dark) { .class-group h2 { border-color: #4a4a4a; } }
+header { display: flex; justify-content: space-between; align-items: end; gap: 15px; margin-bottom: 24px; }
+  .date { color: var(--muted); font-size: 12px; }
+  .summary { display: flex; gap: 28px; padding: 17px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); margin-bottom: 30px; }
+  .summary span { display: flex; flex-direction: column; gap: 3px; color: var(--muted); font-size: 11px; }
+  .summary strong { color: var(--text); font-size: 18px; letter-spacing: -.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .class-group { margin-bottom: 30px; }
+  .class-group h2 { display: flex; align-items: center; gap: 10px; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 8px; }
+  .class-group h2::before { content: ""; width: 5px; height: 14px; border-radius: 2px; background: var(--accent); }
+  ul { list-style: none; padding: 0; margin: 0; }
+  .empty strong { color: var(--text); display: block; font-weight: 600; }
+  .empty p { font-size: 12px; }
+  @media(max-width: 540px) { header { align-items: start; flex-direction: column; gap: 3px; } .summary { gap: 20px; } }
 </style>
