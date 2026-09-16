@@ -73,6 +73,13 @@ pub struct TodoistClient {
     base: String,
 }
 
+fn command_succeeded(body: &serde_json::Value, uuid: &str) -> bool {
+    body.get("sync_status")
+        .and_then(|v| v.get(uuid))
+        .and_then(|v| v.as_str())
+        == Some("ok")
+}
+
 impl TodoistClient {
     pub fn new(token: String) -> Result<Self, TodoistApiError> {
         Ok(Self {
@@ -160,12 +167,7 @@ impl TodoistClient {
                 .get("uuid")
                 .and_then(|v| v.as_str())
                 .ok_or(TodoistApiError::InvalidResponse)?;
-            let status = body
-                .get("sync_status")
-                .and_then(|v| v.get(uuid))
-                .and_then(|v| v.get("code"))
-                .and_then(|v| v.as_i64());
-            if status != Some(0) {
+            if !command_succeeded(&body, uuid) {
                 return Err(TodoistApiError::InvalidResponse);
             }
         }
@@ -239,5 +241,13 @@ mod tests {
         let mut client = TodoistClient::new("test-token".into()).unwrap();
         client.base = "http://127.0.0.1:0".into();
         assert!(matches!(client.fetch("*"), Err(TodoistApiError::Network)));
+    }
+
+    #[test]
+    fn todoist_sync_command_success_is_the_ok_string() {
+        let body = serde_json::json!({"sync_status": {"command-1": "ok"}});
+        assert!(command_succeeded(&body, "command-1"));
+        let legacy = serde_json::json!({"sync_status": {"command-1": {"code": 0}}});
+        assert!(!command_succeeded(&legacy, "command-1"));
     }
 }

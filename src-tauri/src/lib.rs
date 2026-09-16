@@ -52,6 +52,8 @@ pub fn run() {
                 .expect("failed to resolve app data dir");
             let conn = db::open(&app_data_dir).expect("failed to open database");
             app.manage(Db(Mutex::new(conn)));
+            todoist::sync::recover_inflight_outbox(&app.state::<Db>())
+                .expect("failed to recover Todoist outbox");
             tray::setup(app.handle())?;
             desktop::setup(app.handle())?;
             reminders::setup(app.handle());

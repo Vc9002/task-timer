@@ -1,5 +1,20 @@
 # TaskTimer Roadmap
 
+## Current status (2026-09-16)
+
+The v0.2 desktop release and v0.3 planning release are implemented on
+`main`. Todoist completion write-back is implemented as a local, retryable
+outbox. This stabilization pass fixes the remaining CI and write-back
+correctness issues before further feature work.
+
+Completed: tray controls, global shortcuts, autostart, notifications,
+exports, Today/Week/Calendar planning, capacity and workload summaries,
+recurring task generation, and Todoist completion queuing.
+
+Still intentionally deferred: Canvas import, full Todoist field write-back,
+advanced analytics, automatic scheduling, and AI. These are separate releases
+and must not be mixed into the stabilization work.
+
 ## Path
 
 ```
@@ -62,7 +77,7 @@ Verify: remaining-time math, parent/subtask aggregation, overloaded-day
 warnings, Next Up ordering, Mac sleep/wake, menu-bar behavior, workload
 calculations. Add tests for week/month/year boundaries. Keep macOS CI green.
 
-## v0.3.2 — Recurring tasks + Calendar
+## v0.3.2 — Recurring tasks + Calendar (implemented; stabilization ongoing)
 
 - Recurring task templates (`recurring_task_templates`, new migration,
   never edit old migrations)
@@ -74,7 +89,7 @@ calculations. Add tests for week/month/year boundaries. Keep macOS CI green.
 - Calendar view built on the same scheduling model as Week, CSS grid only
   (no calendar library), always separating planned work from due dates
 
-## v0.4 — Integrations
+## v0.4 — Integrations (completion write-back implemented; Canvas deferred)
 
 - Todoist completion write-back via a persistent, retry-safe outbox.
   Not every field two-way immediately.

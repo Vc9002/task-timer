@@ -1,4 +1,4 @@
-use super::tasks::{row_to_task, Task, TASK_SELECT};
+use super::tasks::{row_to_task, Task, ELIGIBLE_TASK_CLAUSE, TASK_SELECT};
 use crate::db::Db;
 use chrono::{Duration, NaiveDate};
 use rusqlite::Connection;
@@ -19,6 +19,7 @@ pub struct WeekTask {
     pub tracked_seconds_total: i64,
     pub remaining_minutes: Option<i64>,
     pub overdue: bool,
+    pub context_only: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -41,7 +42,12 @@ pub struct WeekSummary {
     pub tracked_seconds: i64,
 }
 
-fn to_week_task(conn: &Connection, task: Task, today: &str) -> rusqlite::Result<WeekTask> {
+fn to_week_task(
+    conn: &Connection,
+    task: Task,
+    today: &str,
+    context_only: bool,
+) -> rusqlite::Result<WeekTask> {
     let course_code: String = conn.query_row(
         "SELECT course_code FROM classes WHERE id=?1",
         [task.class_id],
@@ -69,13 +75,12 @@ fn to_week_task(conn: &Connection, task: Task, today: &str) -> rusqlite::Result<
         tracked_seconds_total: task.tracked_seconds,
         remaining_minutes: task.remaining_minutes,
         overdue: overdue && not_completed,
+        context_only,
     })
 }
 
 fn eligible_clause() -> &'static str {
-    "t.class_id IN (SELECT id FROM classes WHERE active=1) AND
-     (t.source='local' OR (t.external_state='active' AND EXISTS
-        (SELECT 1 FROM todoist_projects p WHERE p.todoist_id=t.todoist_project_id AND p.class_id=t.class_id)))"
+    ELIGIBLE_TASK_CLAUSE
 }
 
 fn capacity_for(conn: &Connection, date: &str, weekday: u32) -> rusqlite::Result<Option<i64>> {
@@ -110,24 +115,51 @@ pub(crate) fn week_for(conn: &Connection, start_date: &str) -> rusqlite::Result<
     let eligible = eligible_clause();
     let tasks: Vec<Task> = conn
         .prepare(&format!(
-            "{TASK_SELECT} WHERE {eligible} AND t.status != 'completed' AND t.parent_task_id IS NULL ORDER BY t.id"
+            "{TASK_SELECT} WHERE {eligible} AND t.status != 'completed' ORDER BY t.id"
         ))?
         .query_map([], row_to_task)?
         .collect::<Result<_, _>>()?;
 
+    let by_id: std::collections::HashMap<i64, Task> =
+        tasks.iter().cloned().map(|t| (t.id, t)).collect();
+    let mut selected = std::collections::HashSet::new();
+    for task in &tasks {
+        if task
+            .scheduled_date
+            .as_deref()
+            .is_some_and(|d| d >= start.to_string().as_str() && d <= end.to_string().as_str())
+        {
+            selected.insert(task.id);
+            let mut parent = task.parent_task_id;
+            while let Some(pid) = parent {
+                let Some(parent_task) = by_id.get(&pid) else {
+                    break;
+                };
+                selected.insert(pid);
+                parent = parent_task.parent_task_id;
+            }
+        }
+    }
     let mut days = Vec::new();
     let mut week_estimate_remaining = 0i64;
     let mut week_tracked = 0i64;
     let mut unscheduled = Vec::new();
 
     for task in tasks {
-        let week_task = to_week_task(conn, task, &today)?;
+        if task.scheduled_date.is_some() && !selected.contains(&task.id) {
+            continue;
+        }
+        let context_only = selected.contains(&task.id) && task.scheduled_date.as_deref().is_none();
+        let week_task = to_week_task(conn, task, &today, context_only)?;
         match &week_task.scheduled_date {
             Some(date)
                 if date.as_str() >= start.to_string().as_str()
                     && date.as_str() <= end.to_string().as_str() => {}
             Some(_) => continue,
             None => {
+                if week_task.context_only {
+                    continue;
+                }
                 let lookahead = end + Duration::days(7);
                 let in_range = week_task
                     .due_at
@@ -143,10 +175,14 @@ pub(crate) fn week_for(conn: &Connection, start_date: &str) -> rusqlite::Result<
                 continue;
             }
         }
-        if let Some(minutes) = week_task.remaining_minutes {
-            week_estimate_remaining += minutes;
+        if !week_task.context_only {
+            if let Some(minutes) = week_task.remaining_minutes {
+                week_estimate_remaining += minutes;
+            }
         }
-        week_tracked += week_task.tracked_seconds_direct;
+        if !week_task.context_only {
+            week_tracked += week_task.tracked_seconds_direct;
+        }
         days.push(week_task);
     }
 
@@ -171,6 +207,7 @@ pub(crate) fn week_for(conn: &Connection, start_date: &str) -> rusqlite::Result<
                 tracked_seconds_total: t.tracked_seconds_total,
                 remaining_minutes: t.remaining_minutes,
                 overdue: t.overdue,
+                context_only: t.context_only,
             })
             .collect();
         let estimated_minutes_remaining =

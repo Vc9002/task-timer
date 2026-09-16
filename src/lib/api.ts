@@ -155,6 +155,7 @@ export interface WeekTask {
   tracked_seconds_total: number;
   remaining_minutes: number | null;
   overdue: boolean;
+  context_only?: boolean;
 }
 
 export interface WeekDay {

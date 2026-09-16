@@ -38,12 +38,15 @@ pub fn sync_now(db: &Db) -> Result<SyncResult, String> {
             Ok(vec![first])
         }
     })?;
-    flush_outbox(db)?;
+    flush_outbox_unlocked(db)?;
     Ok(result)
 }
 
 pub fn queue_completion(conn: &Connection, task_id: i64) -> Result<(), String> {
-    let (external_id, source): (Option<String>, String) = conn
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|_| "Couldn't start task completion".to_string())?;
+    let (external_id, source): (Option<String>, String) = tx
         .query_row(
             "SELECT external_id,source FROM tasks WHERE id=?1",
             [task_id],
@@ -54,18 +57,34 @@ pub fn queue_completion(conn: &Connection, task_id: i64) -> Result<(), String> {
         return Err("This task is not a Todoist task.".into());
     }
     let external_id = external_id.unwrap();
-    let already_queued: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM integration_outbox WHERE external_id=?1 AND status IN ('pending','sending','completed'))", [&external_id], |r| r.get(0)).map_err(|_| "Couldn't inspect Todoist completion")?;
+    let already_queued: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM integration_outbox WHERE external_id=?1 AND status IN ('pending','sending','completed'))", [&external_id], |r| r.get(0)).map_err(|_| "Couldn't inspect Todoist completion")?;
     if already_queued {
+        tx.commit()
+            .map_err(|_| "Couldn't save task completion".to_string())?;
         return Ok(());
     }
     let uuid = Uuid::new_v4().to_string();
     let payload = serde_json::json!({"type":"item_complete","uuid":uuid,"args":{"id":external_id}});
-    conn.execute("INSERT INTO integration_outbox(provider,entity_type,external_id,command_uuid,command_type,payload_json) VALUES('todoist','task',?1,?2,'item_complete',?3)", rusqlite::params![external_id, uuid, payload.to_string()]).map_err(|_| "Couldn't queue Todoist completion")?;
-    conn.execute("UPDATE tasks SET status='completed',completed_at=datetime('now'),updated_at=datetime('now') WHERE id=?1", [task_id]).map_err(|_| "Couldn't save task completion")?;
+    tx.execute("INSERT INTO integration_outbox(provider,entity_type,external_id,command_uuid,command_type,payload_json) VALUES('todoist','task',?1,?2,'item_complete',?3)", rusqlite::params![external_id, uuid, payload.to_string()]).map_err(|_| "Couldn't queue Todoist completion")?;
+    tx.execute("UPDATE tasks SET status='completed',completed_at=datetime('now'),updated_at=datetime('now') WHERE id=?1", [task_id]).map_err(|_| "Couldn't save task completion")?;
+    tx.commit()
+        .map_err(|_| "Couldn't save task completion".to_string())?;
     Ok(())
 }
 
 pub fn flush_outbox(db: &Db) -> Result<(), String> {
+    let _gate = gate()?;
+    flush_outbox_unlocked(db)
+}
+
+pub fn recover_inflight_outbox(db: &Db) -> Result<(), String> {
+    let conn = db.0.lock().map_err(database_error)?;
+    conn.execute("UPDATE integration_outbox SET status='pending', updated_at=datetime('now') WHERE status='sending'", [])
+        .map_err(database_error)?;
+    Ok(())
+}
+
+fn flush_outbox_unlocked(db: &Db) -> Result<(), String> {
     let token = super::get_token()?.ok_or("No Todoist token configured")?;
     let entries: Vec<(i64, String, String)> = {
         let conn = db.0.lock().map_err(database_error)?;

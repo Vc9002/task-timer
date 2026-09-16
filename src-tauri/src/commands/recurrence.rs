@@ -1,4 +1,4 @@
-use crate::commands::tasks::{row_to_task, Task, TASK_SELECT};
+use crate::commands::tasks::{row_to_task, Task, ELIGIBLE_TASK_CLAUSE, TASK_SELECT};
 use crate::db::Db;
 use chrono::{Datelike, Duration, NaiveDate};
 use rusqlite::{params, Connection};
@@ -88,7 +88,15 @@ fn should_generate(t: &RecurringTemplate, date: NaiveDate) -> bool {
     match t.recurrence_type.as_str() {
         "daily" => days % t.interval == 0,
         "weekly" => days % 7 == 0 && (days / 7) % t.interval == 0,
-        "weekdays" => date.weekday().number_from_monday() <= 5 && days % t.interval == 0,
+        "weekdays" => {
+            let selected = t.weekdays.as_deref().unwrap_or("1,2,3,4,5");
+            let weekday = date.weekday().number_from_monday() as i64;
+            let selected = selected
+                .split(',')
+                .filter_map(|v| v.trim().parse::<i64>().ok())
+                .any(|v| v == weekday);
+            selected && (days / 7) % t.interval == 0
+        }
         _ => false,
     }
 }
@@ -139,11 +147,18 @@ pub fn create_recurring_template(
 #[tauri::command]
 pub fn set_recurring_template_active(db: State<Db>, id: i64, active: bool) -> Result<(), String> {
     let c = db.0.lock().map_err(|_| "Couldn't update recurring task")?;
-    c.execute(
+    let tx = c
+        .unchecked_transaction()
+        .map_err(|_| "Couldn't update recurring task")?;
+    tx.execute(
         "UPDATE recurring_task_templates SET active=?1,updated_at=datetime('now') WHERE id=?2",
         params![active, id],
     )
     .map_err(|_| "Couldn't update recurring task")?;
+    if !active {
+        tx.execute("DELETE FROM tasks WHERE recurring_template_id=?1 AND status!='completed' AND occurrence_date >= date('now','localtime') AND NOT EXISTS (SELECT 1 FROM time_sessions WHERE task_id=tasks.id)", [id]).map_err(|_| "Couldn't clean recurring tasks")?;
+    }
+    tx.commit().map_err(|_| "Couldn't update recurring task")?;
     Ok(())
 }
 
@@ -162,7 +177,7 @@ pub fn get_calendar(db: State<Db>, month: String) -> Result<Vec<CalendarDay>, St
         .ok_or("Invalid month")?;
     let c = db.0.lock().map_err(|_| "Couldn't load calendar")?;
     ensure_generated(&c, 45).map_err(|_| "Couldn't prepare recurring tasks")?;
-    let tasks:Vec<Task>=c.prepare(&format!("{TASK_SELECT} WHERE t.class_id IN (SELECT id FROM classes WHERE active=1) AND t.status != 'completed' AND ((t.scheduled_date >= ?1 AND t.scheduled_date < ?2) OR (substr(t.due_at,1,10) >= ?1 AND substr(t.due_at,1,10) < ?2)) ORDER BY t.id")).map_err(|_| "Couldn't load calendar tasks")?.query_map(params![first.to_string(),next.to_string()],row_to_task).map_err(|_| "Couldn't load calendar tasks")?.collect::<Result<_,_>>().map_err(|_| "Couldn't load calendar tasks")?;
+    let tasks:Vec<Task>=c.prepare(&format!("{TASK_SELECT} WHERE {ELIGIBLE_TASK_CLAUSE} AND t.status != 'completed' AND ((t.scheduled_date >= ?1 AND t.scheduled_date < ?2) OR (substr(t.due_at,1,10) >= ?1 AND substr(t.due_at,1,10) < ?2)) ORDER BY t.id")).map_err(|_| "Couldn't load calendar tasks")?.query_map(params![first.to_string(),next.to_string()],row_to_task).map_err(|_| "Couldn't load calendar tasks")?.collect::<Result<_,_>>().map_err(|_| "Couldn't load calendar tasks")?;
     let mut out = Vec::new();
     let mut d = first;
     while d < next {

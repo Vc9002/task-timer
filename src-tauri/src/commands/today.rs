@@ -1,4 +1,4 @@
-use super::tasks::{row_to_task, Task, TASK_SELECT};
+use super::tasks::{row_to_task, Task, ELIGIBLE_TASK_CLAUSE, TASK_SELECT};
 use crate::db::Db;
 use rusqlite::{params, Connection};
 use serde::Serialize;
@@ -54,9 +54,7 @@ pub(crate) fn today_for(
     date: &str,
     include_overdue: bool,
 ) -> rusqlite::Result<TodaySummary> {
-    let eligible = "t.class_id IN (SELECT id FROM classes WHERE active=1) AND
-        (t.source='local' OR (t.external_state='active' AND EXISTS
-        (SELECT 1 FROM todoist_projects p WHERE p.todoist_id=t.todoist_project_id AND p.class_id=t.class_id)))";
+    let eligible = ELIGIBLE_TASK_CLAUSE;
     let tasks: Vec<Task> = conn
         .prepare(&format!("{TASK_SELECT} WHERE {eligible} ORDER BY t.id"))?
         .query_map([], row_to_task)?

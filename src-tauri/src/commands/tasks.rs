@@ -59,6 +59,10 @@ pub(crate) const TASK_SELECT: &str = "SELECT t.*, (
       WHERE end_ts IS NOT NULL AND task_id = t.id
 ) AS tracked_seconds_direct FROM tasks t";
 
+pub(crate) const ELIGIBLE_TASK_CLAUSE: &str = "t.class_id IN (SELECT id FROM classes WHERE active=1) AND
+    (t.source='local' OR (t.external_state='active' AND EXISTS
+        (SELECT 1 FROM todoist_projects p WHERE p.todoist_id=t.todoist_project_id AND p.class_id=t.class_id)))";
+
 pub(crate) fn row_to_task(row: &rusqlite::Row) -> rusqlite::Result<Task> {
     let estimated_minutes: Option<i64> = row.get("estimated_minutes")?;
     let tracked_seconds_direct: i64 = row.get("tracked_seconds_direct")?;
