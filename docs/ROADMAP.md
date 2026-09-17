@@ -2,10 +2,10 @@
 
 ## Current status — 2026-09-16
 
-The v0.3.3 productivity workflow is on `main`. The next planning pass is
-implemented in the current working tree and still needs a native macOS
-real-use check and release commit. The browser shell has been smoke-tested;
-browser preview cannot exercise Tauri commands or the menu-bar process.
+The v0.3.3 productivity workflow and the next academic-planning pass are on
+`main`. The current commit is `b10bdad` (`feat: add academic planning
+workflow`). The browser shell has been smoke-tested; browser preview cannot
+exercise Tauri commands or the menu-bar process.
 
 Automated evidence currently passes:
 
@@ -15,11 +15,12 @@ Automated evidence currently passes:
 - `cargo clippy --all-targets --all-features -- -D warnings`
 - `cargo test --lib` — 61 passed
 
-The current committed baseline is `770ccfa`.
+The previous baseline was `770ccfa`. The current committed baseline is
+`b10bdad`.
 
-## Next planning pass — Study Blocks, Risk, Milestones, Templates
+## Current planning pass — Study Blocks, Risk, Milestones, Templates
 
-### Implemented in the working tree
+### Implemented on `main`
 
 - Study Blocks are separate planning allocations with date, optional start
   time, duration, edit/delete, and task-level coverage calculations.
@@ -31,15 +32,27 @@ The current committed baseline is `770ccfa`.
 - Task planning includes milestone create/edit/complete/reorder/delete.
 - Task Templates can be created in Settings and instantiated from Quick Add.
 
+### Known limitations
+
+- Study Blocks can currently overlap. Saving an overlap is allowed, but the
+  UI should warn about the conflict before this pass is considered fully
+  polished.
+- A block's `completed` state means the planned block was acknowledged, not
+  that the task or an associated timer session was completed. UI copy should
+  use “Mark block done” to keep those states distinct.
+- Template milestone presets are supported by the backend instantiation path,
+  but there is not yet a dedicated editor for managing them in Settings.
+
 ### New migrations
 
 - `0009_study_blocks`
 - `0010_task_milestones`
 - `0011_task_templates`
 
-### Release gate
+### Native validation still open
 
-Before calling this pass released:
+The implementation and automated checks are complete. Before calling this
+pass operationally released:
 
 1. Create multiple blocks for one task and verify they appear in Week and
    Calendar without changing `scheduled_date`.
@@ -49,6 +62,50 @@ Before calling this pass released:
 4. Create a template, instantiate it from Quick Add, and verify its defaults.
 5. Run the automated checks, then perform the native macOS check on an
    existing database.
+
+The native Tauri packaging/link step has not produced a new verified bundle in
+this pass. CI is intentionally non-blocking for the next development steps;
+local checks and native runtime validation remain the meaningful gates.
+
+## Open roadmap — prioritized
+
+### Pass B — Time intelligence and factual review
+
+1. Estimate-vs-actual backend fields and reporting.
+2. Estimate accuracy grouped by class and task type, using medians and sample
+   thresholds.
+3. User-approved estimate suggestions.
+4. Planned Study Block minutes versus aggregate actual task/day time.
+5. Weekly Review with tracked time, completions, overdue work, estimate misses,
+   class totals, session statistics, and schedule coverage.
+6. Deadline-risk and workload summaries using remaining work, blocks, capacity,
+   and due dates.
+
+Stop after this pass and validate the statistics against real coursework.
+
+### Pass C — Deterministic assisted planning
+
+1. Plan My Day with preview, adjust, apply, and cancel actions.
+2. Plan My Week with deadline and capacity constraints.
+3. Propose Study Blocks for large assignments without creating fake subtasks.
+4. Preserve manual blocks and never schedule work after its deadline.
+
+### Pass D — Integration hardening
+
+1. Todoist outbox status, retry, and last-error UI.
+2. Explicit ownership enforcement for every synchronized field.
+3. Canvas read-only import with stable course and assignment links.
+
+### Pass E — Semester-scale workflows
+
+1. Semester dashboard.
+2. Exam Mode.
+3. Deterministic natural-language capture.
+4. Search improvements only if indexed search becomes a measured bottleneck.
+5. Optional AI proposals only after deterministic planning is reliable.
+
+Do not start Canvas, AI, cloud sync, or additional productivity primitives
+before Pass B is validated.
 
 ## v0.3.3 — Productivity workflow
 
