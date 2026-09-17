@@ -21,6 +21,7 @@ use commands::planning::{
     list_task_milestones, list_task_templates, list_template_milestones, move_task_milestone,
     update_study_block, update_task_milestone,
 };
+use commands::pomodoro::{get_pomodoro_settings, notify_pomodoro_phase, save_pomodoro_settings};
 use commands::recurrence::{
     create_recurring_template, get_calendar, list_recurring_templates,
     set_recurring_template_active, update_recurring_template,
@@ -129,6 +130,9 @@ pub fn run() {
             delete_template_milestone,
             get_plan_proposal,
             apply_plan,
+            get_pomodoro_settings,
+            save_pomodoro_settings,
+            notify_pomodoro_phase,
             list_tasks_for_class,
             list_inbox,
             create_task,

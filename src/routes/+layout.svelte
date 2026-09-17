@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { page } from "$app/stores";
   import { timerStore } from "$lib/stores/timer.svelte";
+  import { pomodoroStore } from "$lib/stores/pomodoro.svelte";
   import Modal from "$lib/components/Modal.svelte";
   import { formatHms } from "$lib/format";
   import QuickAdd from "$lib/components/QuickAdd.svelte";
@@ -19,6 +20,7 @@
 
   onMount(() => {
     timerStore.mount();
+    void pomodoroStore.loadSettings();
     focusMode = localStorage.getItem("tasktimer-focus-mode") === "true";
     let disposed = false;
     const unlisteners: UnlistenFn[] = [];
@@ -139,6 +141,18 @@
       <a href={link.href} class:active={$page.url.pathname === link.href} aria-current={$page.url.pathname === link.href ? "page" : undefined}><Icon name={link.icon} />{link.label}</a>
     {/each}
     </nav>
+    <div class="pomodoro-widget" class:on-break={pomodoroStore.phase === "break"}>
+      {#if pomodoroStore.phase === "idle"}
+        <button class="pomodoro-start" onclick={() => pomodoroStore.start()}><Icon name="clock" size={14} />Start Pomodoro</button>
+      {:else}
+        <span class="pomodoro-phase">{pomodoroStore.phase === "work" ? "Focus" : "Break"}</span>
+        <span class="pomodoro-clock">{formatHms(pomodoroStore.remainingSeconds)}</span>
+        <div class="pomodoro-actions">
+          <button onclick={() => pomodoroStore.skip()}>Skip</button>
+          <button onclick={() => pomodoroStore.stop()}>Stop</button>
+        </div>
+      {/if}
+    </div>
     <div class="sidebar-bottom"><span class="eyebrow">One task at a time</span><button class="primary" onclick={() => pickerOpen = true}><Icon name="play" size={15} />{timerStore.active ? "Switch task" : "Start a task"}</button></div>
   </aside>
   <div class="workspace">
@@ -173,7 +187,14 @@
   nav a { display: flex; align-items: center; gap: 10px; padding: 9px 12px; color: var(--muted); text-decoration: none; border-radius: 6px; font-size: 13px; font-weight: 500; }
   nav a:hover { background: var(--hover); color: var(--text); }
   nav a.active { color: var(--accent); background: var(--accent-soft); font-weight: 650; }
-  .sidebar-bottom { margin-top: auto; display: grid; gap: 10px; padding-top: 30px; }
+  .pomodoro-widget { margin-top: auto; padding: 10px; border: 1px solid var(--line); border-radius: 8px; display: grid; gap: 6px; font-size: 12px; }
+  .pomodoro-widget.on-break { border-color: var(--accent); }
+  .pomodoro-start { justify-content: flex-start; padding: 7px 8px; font-size: 12px; color: var(--muted); }
+  .pomodoro-phase { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .06em; }
+  .pomodoro-clock { font-family: ui-monospace, "SFMono-Regular", Consolas, monospace; font-variant-numeric: tabular-nums; font-size: 18px; letter-spacing: -.5px; }
+  .pomodoro-actions { display: flex; gap: 6px; }
+  .pomodoro-actions button { flex: 1; padding: 4px; font-size: 11px; }
+  .sidebar-bottom { display: grid; gap: 10px; padding-top: 16px; }
   .sidebar-bottom .eyebrow { text-align: center; font-size: 9px; }
   .workspace { flex: 1; min-width: 0; display: flex; flex-direction: column; }
   .focus-mode .sidebar { display: none; }

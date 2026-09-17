@@ -3,6 +3,7 @@ pub mod classes;
 pub mod exams;
 pub mod planner;
 pub mod planning;
+pub mod pomodoro;
 pub mod recurrence;
 pub mod tasks;
 pub mod today;

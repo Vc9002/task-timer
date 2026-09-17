@@ -6,6 +6,11 @@ export function notificationSettings(): Promise<NotificationPreferences> { retur
 export function saveNotificationSettings(settings: NotificationPreferences): Promise<void> { return invoke("save_notification_settings", { settings }); }
 export function testNotification(): Promise<void> { return invoke("test_notification"); }
 
+export interface PomodoroSettings { work_minutes: number; break_minutes: number }
+export function getPomodoroSettings(): Promise<PomodoroSettings> { return invoke("get_pomodoro_settings"); }
+export function savePomodoroSettings(settings: PomodoroSettings): Promise<void> { return invoke("save_pomodoro_settings", { settings }); }
+export function notifyPomodoroPhase(phase: "work_done" | "break_done"): Promise<void> { return invoke("notify_pomodoro_phase", { phase }); }
+
 // ---------- Classes ----------
 
 export interface ClassRecord {
