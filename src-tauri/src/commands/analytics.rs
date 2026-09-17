@@ -148,6 +148,15 @@ const DURATION_EXPR: &str = "
             ELSE 0 END)
 ";
 
+/// Date-only due dates (10 chars) are floating local dates; timestamp deadlines
+/// are converted via 'localtime'. `{0}` is substituted with the due-date column
+/// reference (e.g. `t.due_at` or `due_at`) — matches the pattern in
+/// today.rs/week.rs/planner.rs. Bare `date(due_at)` (without this normalization)
+/// misdates timestamp due values by treating them as UTC.
+fn due_date_expr(column: &str) -> String {
+    format!("CASE WHEN length({column})=10 THEN date({column}) ELSE date({column},'localtime') END")
+}
+
 fn range_summary(
     conn: &rusqlite::Connection,
     date_filter_sql: &str,
@@ -644,6 +653,7 @@ fn workload_days(
             "SELECT COALESCE(SUM(planned_minutes),0) FROM study_blocks WHERE planned_date=?1 AND completed=0",
             [&date_string], |row| row.get::<_, i64>(0)
         )?;
+        let due_expr = due_date_expr("t.due_at");
         let sql = format!(
             "SELECT t.estimated_minutes, COALESCE(SUM({DURATION_EXPR}),0),
                     COALESCE((SELECT SUM(sb.planned_minutes) FROM study_blocks sb
@@ -651,7 +661,7 @@ fn workload_days(
              FROM tasks t
              LEFT JOIN time_sessions ts ON ts.task_id=t.id AND ts.end_ts IS NOT NULL
              WHERE t.status!='completed' AND t.estimated_minutes IS NOT NULL
-               AND t.due_at IS NOT NULL AND date(t.due_at)=date(?1)
+               AND t.due_at IS NOT NULL AND {due_expr}=date(?1)
              GROUP BY t.id, t.estimated_minutes, t.due_at"
         );
         let mut stmt = conn.prepare(&sql)?;
@@ -694,6 +704,7 @@ fn schedule_coverage(
     start_date: &str,
     end_date: &str,
 ) -> rusqlite::Result<i64> {
+    let due_expr = due_date_expr("t.due_at");
     let sql = format!(
         "SELECT COALESCE(SUM(t.estimated_minutes - CAST(COALESCE(SUM({DURATION_EXPR}),0) AS INTEGER)/60),0),
                 COALESCE(SUM((SELECT SUM(sb.planned_minutes) FROM study_blocks sb
@@ -701,7 +712,7 @@ fn schedule_coverage(
          FROM tasks t
          LEFT JOIN time_sessions ts ON ts.task_id=t.id AND ts.end_ts IS NOT NULL
          WHERE t.status!='completed' AND t.estimated_minutes IS NOT NULL AND t.due_at IS NOT NULL
-           AND date(t.due_at) BETWEEN date(?1) AND date(?2)
+           AND {due_expr} BETWEEN date(?1) AND date(?2)
          GROUP BY t.id"
     );
     let mut stmt = conn.prepare(&sql)?;
@@ -751,10 +762,16 @@ pub fn get_weekly_review(db: State<Db>, start_date: String) -> Result<WeeklyRevi
         "SELECT COUNT(*) FROM tasks WHERE status='completed' AND completed_at IS NOT NULL AND date(completed_at,'localtime') BETWEEN date(?1) AND date(?2)",
         rusqlite::params![start_date, end_date], |row| row.get(0)
     ).map_err(|e| e.to_string())?;
-    let overdue_tasks: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM tasks WHERE status!='completed' AND due_at IS NOT NULL AND date(due_at) < date(?1)",
-        [&end_date], |row| row.get(0)
-    ).map_err(|e| e.to_string())?;
+    let overdue_tasks: i64 = conn
+        .query_row(
+            &format!(
+                "SELECT COUNT(*) FROM tasks WHERE status!='completed' AND due_at IS NOT NULL AND {} < date(?1)",
+                due_date_expr("due_at")
+            ),
+            [&end_date],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
     let samples = estimate_samples(&conn, &start_date, &end_date).map_err(|e| e.to_string())?;
     let largest_estimate_miss = samples
         .iter()
