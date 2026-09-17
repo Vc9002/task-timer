@@ -145,7 +145,7 @@
       {#if pomodoroStore.phase === "idle"}
         <button class="pomodoro-start" onclick={() => pomodoroStore.start()}><Icon name="clock" size={14} />Start Pomodoro</button>
       {:else}
-        <span class="pomodoro-phase">{pomodoroStore.phase === "work" ? "Focus" : "Break"}</span>
+        <span class="pomodoro-phase">{pomodoroStore.phase === "work" ? "Focus" : pomodoroStore.onLongBreak ? "Long break" : "Break"}</span>
         <span class="pomodoro-clock">{formatHms(pomodoroStore.remainingSeconds)}</span>
         <div class="pomodoro-actions">
           <button onclick={() => pomodoroStore.skip()}>Skip</button>

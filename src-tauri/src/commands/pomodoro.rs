@@ -8,6 +8,12 @@ use tauri_plugin_notification::NotificationExt;
 pub struct PomodoroSettings {
     pub work_minutes: i64,
     pub break_minutes: i64,
+    #[serde(default = "default_long_break_minutes")]
+    pub long_break_minutes: i64,
+}
+
+fn default_long_break_minutes() -> i64 {
+    15
 }
 
 impl Default for PomodoroSettings {
@@ -15,6 +21,7 @@ impl Default for PomodoroSettings {
         PomodoroSettings {
             work_minutes: 25,
             break_minutes: 5,
+            long_break_minutes: 15,
         }
     }
 }
@@ -38,6 +45,9 @@ fn save_settings(conn: &Connection, settings: &PomodoroSettings) -> Result<(), S
     }
     if settings.break_minutes < 1 || settings.break_minutes > 60 {
         return Err("Break length must be between 1 and 60 minutes.".into());
+    }
+    if settings.long_break_minutes < 1 || settings.long_break_minutes > 90 {
+        return Err("Long break length must be between 1 and 90 minutes.".into());
     }
     let json = serde_json::to_string(settings).map_err(|e| e.to_string())?;
     conn.execute(
@@ -106,12 +116,14 @@ mod tests {
             &PomodoroSettings {
                 work_minutes: 50,
                 break_minutes: 10,
+                long_break_minutes: 20,
             },
         )
         .unwrap();
         let settings = pomodoro_settings(&conn).unwrap();
         assert_eq!(settings.work_minutes, 50);
         assert_eq!(settings.break_minutes, 10);
+        assert_eq!(settings.long_break_minutes, 20);
     }
 
     #[test]
@@ -121,7 +133,8 @@ mod tests {
             &conn,
             &PomodoroSettings {
                 work_minutes: 0,
-                break_minutes: 5
+                break_minutes: 5,
+                long_break_minutes: 15
             }
         )
         .is_err());
@@ -129,7 +142,8 @@ mod tests {
             &conn,
             &PomodoroSettings {
                 work_minutes: 25,
-                break_minutes: 0
+                break_minutes: 0,
+                long_break_minutes: 15
             }
         )
         .is_err());

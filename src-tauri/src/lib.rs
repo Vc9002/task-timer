@@ -2,6 +2,7 @@ mod commands;
 mod db;
 mod desktop;
 mod export;
+mod idle;
 mod reminders;
 mod timer;
 mod todoist;
@@ -70,6 +71,7 @@ pub fn run() {
             tray::setup(app.handle())?;
             desktop::setup(app.handle())?;
             reminders::setup(app.handle());
+            idle::setup(app.handle());
 
             // Todoist is intentionally opt-in at runtime. Avoid reading the OS
             // keychain during startup; users can sync explicitly from Settings.
@@ -97,12 +99,15 @@ pub fn run() {
             reminders::notification_settings,
             reminders::save_notification_settings,
             reminders::test_notification,
+            idle::get_idle_threshold,
+            idle::save_idle_threshold,
             export::export_data,
             desktop::desktop_status,
             desktop::save_desktop_settings,
             desktop::set_autostart,
             tray::take_desktop_action,
             tray::list_startable_tasks,
+            tray::set_tray_pomodoro_status,
             list_classes,
             create_class,
             update_class,

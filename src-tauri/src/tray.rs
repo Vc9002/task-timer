@@ -11,7 +11,21 @@ pub struct TrayState {
     label: MenuItem<tauri::Wry>,
     pause: MenuItem<tauri::Wry>,
     finish: MenuItem<tauri::Wry>,
+    pomodoro: MenuItem<tauri::Wry>,
     pending: Mutex<Option<String>>,
+}
+
+/// Pushed by the frontend Pomodoro clock, which is the source of truth for
+/// phase/remaining time; the tray just mirrors it.
+#[tauri::command]
+pub fn set_tray_pomodoro_status(app: AppHandle, text: Option<String>) -> Result<(), String> {
+    let Some(state) = app.try_state::<TrayState>() else {
+        return Ok(());
+    };
+    state
+        .pomodoro
+        .set_text(text.unwrap_or_else(|| "Pomodoro: off".into()))
+        .map_err(|e| e.to_string())
 }
 
 pub fn show(app: &AppHandle) {
@@ -120,6 +134,7 @@ pub fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let label = MenuItem::with_id(app, "status", "No active timer", false, None::<&str>)?;
     let pause = MenuItem::with_id(app, "pause", "Pause", false, None::<&str>)?;
     let finish = MenuItem::with_id(app, "finish", "Finish", false, None::<&str>)?;
+    let pomodoro = MenuItem::with_id(app, "pomodoro", "Pomodoro: off", false, None::<&str>)?;
     let start = MenuItem::with_id(app, "start", "Start / Switch Task…", true, None::<&str>)?;
     let quick = MenuItem::with_id(app, "quick", "Quick Add…", true, None::<&str>)?;
     let open = MenuItem::with_id(app, "open", "Open TaskTimer", true, None::<&str>)?;
@@ -128,7 +143,7 @@ pub fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let menu = Menu::with_items(
         app,
         &[
-            &label, &pause, &finish, &start, &quick, &open, &separator, &quit,
+            &label, &pause, &finish, &pomodoro, &start, &quick, &open, &separator, &quit,
         ],
     )?;
     let mut builder = TrayIconBuilder::with_id("tasktimer")
@@ -151,6 +166,7 @@ pub fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         label,
         pause,
         finish,
+        pomodoro,
         pending: Mutex::new(None),
     });
     refresh(app)?;
