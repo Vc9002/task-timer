@@ -5,6 +5,7 @@
   import TemplateSettings from "$lib/components/TemplateSettings.svelte";
   import PomodoroSettings from "$lib/components/PomodoroSettings.svelte";
   import IdleSettings from "$lib/components/IdleSettings.svelte";
+  import WeeklyReviewSettings from "$lib/components/WeeklyReviewSettings.svelte";
   import {
     getTodoistStatus,
     setTodoistToken,
@@ -156,6 +157,7 @@
   <StudyCapacitySettings />
   <PomodoroSettings />
   <IdleSettings />
+  <WeeklyReviewSettings />
   <TemplateSettings />
 
   {#if error}<p class="error">{error}</p>{/if}

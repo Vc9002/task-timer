@@ -10,6 +10,10 @@ export function testNotification(): Promise<void> { return invoke("test_notifica
 export function getIdleThreshold(): Promise<number> { return invoke("get_idle_threshold"); }
 export function saveIdleThreshold(minutes: number): Promise<void> { return invoke("save_idle_threshold", { minutes }); }
 
+export interface WeeklyReviewSettings { enabled: boolean; weekday: number; hour: number }
+export function getWeeklyReviewSettings(): Promise<WeeklyReviewSettings> { return invoke("get_weekly_review_settings"); }
+export function saveWeeklyReviewSettings(settings: WeeklyReviewSettings): Promise<void> { return invoke("save_weekly_review_settings", { settings }); }
+
 export interface PomodoroSettings { work_minutes: number; break_minutes: number; long_break_minutes: number }
 export function getPomodoroSettings(): Promise<PomodoroSettings> { return invoke("get_pomodoro_settings"); }
 export function savePomodoroSettings(settings: PomodoroSettings): Promise<void> { return invoke("save_pomodoro_settings", { settings }); }

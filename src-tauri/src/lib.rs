@@ -7,6 +7,7 @@ mod reminders;
 mod timer;
 mod todoist;
 mod tray;
+mod weekly_review;
 
 use commands::analytics::{
     get_analytics_month, get_analytics_today, get_analytics_week, get_day_view,
@@ -72,6 +73,7 @@ pub fn run() {
             desktop::setup(app.handle())?;
             reminders::setup(app.handle());
             idle::setup(app.handle());
+            weekly_review::setup(app.handle());
 
             // Todoist is intentionally opt-in at runtime. Avoid reading the OS
             // keychain during startup; users can sync explicitly from Settings.
@@ -101,6 +103,8 @@ pub fn run() {
             reminders::test_notification,
             idle::get_idle_threshold,
             idle::save_idle_threshold,
+            weekly_review::get_weekly_review_settings,
+            weekly_review::save_weekly_review_settings,
             export::export_data,
             export::import_backup,
             desktop::desktop_status,
