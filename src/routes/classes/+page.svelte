@@ -14,6 +14,7 @@
     type TaskRecord,
     type TaskHistory,
   } from "$lib/api";
+  import { timerStore } from "$lib/stores/timer.svelte";
   import { formatDurationShort, formatSignedDurationShort } from "$lib/format";
 
   let classes = $state<ClassRecord[]>([]);
@@ -200,6 +201,7 @@
             <span class="code">{c.course_code}</span>
             {#if c.name}<span class="name">{c.name}</span>{/if}
             <span class="semester">{c.semester}</span>
+            <button class="secondary" disabled={timerStore.busy} onclick={(e) => { e.stopPropagation(); void timerStore.startClass(c.id, c.course_code); }}>Start class timer</button>
             <button class="secondary" onclick={(e) => { e.stopPropagation(); startEditClass(c); }}>Edit</button>
             <button class="secondary" onclick={(e) => { e.stopPropagation(); remove(c.id); }}>Archive</button>
           </div>

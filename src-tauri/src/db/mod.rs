@@ -27,6 +27,14 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "0006_todoist_outbox",
         include_str!("migrations/0006_todoist_outbox.sql"),
     ),
+    (
+        "0007_productivity_workflow",
+        include_str!("migrations/0007_productivity_workflow.sql"),
+    ),
+    (
+        "0008_class_timers",
+        include_str!("migrations/0008_class_timers.sql"),
+    ),
 ];
 
 pub fn open(app_data_dir: &Path) -> rusqlite::Result<Connection> {

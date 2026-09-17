@@ -1,169 +1,114 @@
 # TaskTimer Roadmap
 
-## Current status (2026-09-16)
+## Current status — 2026-09-16
 
-The v0.2 desktop release and v0.3 planning release are implemented on
-`main`. Todoist completion write-back is implemented as a local, retryable
-outbox. This stabilization pass fixes the remaining CI and write-back
-correctness issues before further feature work.
+The v0.3.3 productivity workflow is implemented in the current working tree,
+but it is not yet a release: the changes are uncommitted and native macOS
+real-use validation is still required. The browser shell has been smoke-tested;
+browser preview cannot exercise Tauri commands or the menu-bar process.
 
-Completed: tray controls, global shortcuts, autostart, notifications,
-exports, Today/Week/Calendar planning, capacity and workload summaries,
-recurring task generation, and Todoist completion queuing.
+Automated evidence currently passes:
 
-Still intentionally deferred: Canvas import, full Todoist field write-back,
-advanced analytics, automatic scheduling, and AI. These are separate releases
-and must not be mixed into the stabilization work.
+- `npm run check`
+- `npm run build`
+- `cargo fmt --check`
+- `cargo clippy --all-targets --all-features -- -D warnings`
+- `cargo test --lib` — 58 passed
 
-## v0.3.3 — Productivity workflow pass (in progress)
+The stable baseline before this working-tree pass is commit `bb14332`.
 
-The first slice is complete: Cmd/Ctrl+K opens a keyboard-accessible command
-palette that searches active local tasks and classes, navigates to app views,
-starts a task, or opens Quick Add. It uses existing local commands and adds no
-new persistence surface.
+## v0.3.3 — Productivity workflow
 
-Remaining slices are planned in controlled order: Inbox,
-recurring-template editing, Week parent breadcrumbs, interactive Calendar
-rescheduling, task types and tags, duplicate/undo actions, time budgets,
-Focus Mode, and a compact menu-bar elapsed display. Each slice requires its
-own tests and a real-use check before the next one begins.
+### Implemented
 
-## v0.4.1 — Integration completion
+- Cmd/Ctrl+K command palette for views, classes, active tasks, Quick Add, and
+  timer start/switch.
+- Class-level timers alongside individual task timers; class sessions remain
+  separate from coursework while contributing to class analytics.
+- Inbox for active, incomplete, unscheduled work.
+- Week parent breadcrumbs and Calendar date rescheduling.
+- Recurring-template editing with safe regeneration of future occurrences.
+- Local task types and normalized tags (`assignment`, `reading`,
+  `problem_set`, `exam`, `project`, `other`). Todoist-owned metadata remains
+  read-only.
+- Per-task time-budget metadata and display. Budgets are targets, not hard
+  timer cutoffs or analytics yet.
+- Local-task duplication and completion undo. There is no general deletion
+  undo stack.
+- Focus Mode, persisted locally in the desktop UI.
+- Menu-bar elapsed label refreshed once per minute while a timer is active.
+- Migration `0007_productivity_workflow` for the new task metadata.
 
-Todoist completion write-back is already queued through the durable outbox.
-Remaining integration work is explicit per-field ownership, reliable retry
-status in the UI, and Canvas read-only import with stable course/assignment
-links. Canvas must not overwrite TaskTimer scheduling, estimates, subtasks, or
-time history.
+### Release gate
 
-## Path
+Before calling v0.3.3 released:
 
-```
-v0.2 stable desktop app
-        |
-v0.3   Week + workload planning
-        |
-v0.3.1 Real-use validation
-        |
-v0.3.2 Recurring tasks + Calendar
-        |
-v0.4   Todoist write-back + Canvas
-        |
-v0.5   Estimate / productivity intelligence
-        |
-v0.6   Automatic planning + optional AI
-        |
-v1.0   Stable personal academic OS
-```
+1. Run the native Tauri app on macOS with an existing database.
+2. Create and edit a local task with type, tags, estimate, and budget.
+3. Duplicate it, complete it, and use completion undo.
+4. Move a task from Calendar and verify the persisted scheduled date.
+5. Toggle Focus Mode and verify restart persistence.
+6. Confirm the menu-bar label updates after a minute and remains correct
+   across pause/resume and finish.
+7. Run the same automated checks in CI, then commit the reviewed working tree.
 
-Rule: after each major pass, stop adding features and actually use the app
-for a few days. Real workflow friction surfaces more than speculative
-feature code does.
+The browser shell check is useful for layout/navigation only; it does not
+close this native release gate.
 
-## v0.3 — Academic Planning (done, see commit 092835f)
+## v0.4 — Integrations
 
-Pass 1 scope, in order:
+### Already implemented
 
-1. Week view (`/week`)
-2. Direct vs. aggregate tracked time (`tracked_seconds_direct` /
-   `tracked_seconds_total`)
-3. Remaining-time calculation (`estimated_minutes - direct_tracked_minutes`,
-   clamped at zero)
-4. Study capacity (optional, per-weekday + date overrides)
-5. Workload forecasting (per-day load %, overload warnings)
-6. Next Up (Today page, deterministic ordering, no numeric score)
-7. macOS CI job
+- Todoist completion write-back through a durable, retry-safe local outbox.
+- Explicit local-vs-Todoist ownership for completion and scheduling behavior.
 
-Explicitly deferred to later passes: recurring tasks, calendar view,
-command palette, tags, search, Todoist write-back, Canvas import, AI.
+### Remaining
 
-Key decisions:
-- `due_at` (when it's due) and `scheduled_date` (when you plan to work on
-  it) are always kept separate. Week view places tasks by `scheduled_date`.
-- Unscheduled tasks surface in Week view when incomplete, unscheduled, and
-  due within a 7-day lookahead past the visible week.
-- Parent task remaining-time is direct estimate minus direct tracked time
-  only — never compared against total descendant time.
-- Next Up ordering: overdue, then scheduled today, then soonest due, then
-  higher manual priority, then more remaining work, then task id as a
-  stable tie-break. No opaque score.
-- Priority is standardized to 1 (Low) / 2 (Normal, default) / 3 (High) /
-  4 (Urgent). Todoist priority is mapped through an explicit conversion
-  function (`src/lib/priority.ts`), never assumed equal to local values.
+- Show outbox retry state and last error in the UI.
+- Document and enforce ownership for every synchronized field.
+- Canvas read-only import with stable course and assignment links.
 
-## v0.3.1 — Planning validation polish
-
-Use the app for real coursework for a few days before adding more schema.
-Verify: remaining-time math, parent/subtask aggregation, overloaded-day
-warnings, Next Up ordering, Mac sleep/wake, menu-bar behavior, workload
-calculations. Add tests for week/month/year boundaries. Keep macOS CI green.
-
-## v0.3.2 — Recurring tasks + Calendar (implemented; stabilization ongoing)
-
-- Recurring task templates (`recurring_task_templates`, new migration,
-  never edit old migrations)
-- Generated occurrences as individual rows (never reuse one row), lazily
-  generated ~30 days ahead: on startup, when a template is edited, when
-  Week page opens
-- Editing a template only touches future, unstarted, generated
-  occurrences — never rewrites completed history
-- Calendar view built on the same scheduling model as Week, CSS grid only
-  (no calendar library), always separating planned work from due dates
-
-## v0.4 — Integrations (completion write-back implemented; Canvas deferred)
-
-- Todoist completion write-back via a persistent, retry-safe outbox.
-  Not every field two-way immediately.
-- Canvas read-only import: Canvas owns assignment name/course/due date;
-  TaskTimer owns study scheduling, estimates, subtasks, timing. Canvas
-  never overwrites local planning metadata.
+Canvas may own assignment name, course, and due date. TaskTimer must retain
+study scheduling, estimates, subtasks, and time history. Canvas must never
+overwrite those local planning fields.
 
 ## v0.5 — Time intelligence
 
-Estimate-vs-actual analytics, task types, median duration by task
-type/class, weekly reports, session-length stats, workload accuracy,
-suggested estimates. Statistical and deterministic — no AI required.
+After real-use validation, add deterministic reporting for estimate accuracy,
+actual-vs-estimated time, session length, workload accuracy, deadline risk,
+and weekly review. Use the existing session ledger; do not add AI to the core
+workflow.
 
-## v0.6 — Automatic planning + optional AI
+## v0.6 — Assisted planning
 
-Predicted durations, "Plan My Week," automatic workload balancing,
-splitting large assignments across days. Only after that: optional AI
-explanations / task-breakdown suggestions, always requiring user approval
-before creating anything. AI is never required for core app function.
+Only after v0.5 evidence is useful:
 
-## Deferred features (post-Week-view backlog)
+- Plan My Day / Plan My Week
+- workload balancing and task splitting
+- optional duration predictions
+- optional AI suggestions that always require user approval
 
-Scoped for Passes 2–6 once the planning core is validated:
+Automatic planning must not silently create or reschedule work.
 
-- **Pass 2**: recurring tasks, calendar, task types, tags, search
-  (indexed SQLite, no heavy search library), command palette (`⌘K`), inbox
-- **Pass 3**: study blocks, milestones, templates, per-task time budgets,
-  focus mode, menu-bar mini dashboard
-- **Pass 4**: advanced analytics — estimate accuracy, deadline-risk,
-  context switching, weekly review
-- **Pass 5**: Todoist write-back, Canvas read-only import
-- **Pass 6**: Plan My Day / Plan My Week, automatic duration predictions,
-  optional AI
+## Explicitly out of scope
 
-Highest-value additions beyond the core plan, in no particular order:
-command palette, inbox, study blocks, time budgets, milestones, search,
-templates, deadline risk.
+Canvas write access, full two-way Todoist field sync, cloud sync, mobile,
+Pomodoro/gamification, giant analytics libraries, local LLMs, and AI as a
+required core dependency.
 
-## Explicitly out of scope until stated otherwise
+## Operating rules
 
-Canvas write access, AI required for core function, Todoist full two-way
-sync on first pass, cloud sync, mobile, Pomodoro/gamification, giant
-analytics chart libraries, drag-and-drop calendar, local LLM.
+- Treat roadmap status as an evidence claim: source, tests, and runtime checks
+  outrank stale prose.
+- Preserve the separation between `due_at` and `scheduled_date`.
+- Keep external-provider fields fail-closed and local-owned planning fields
+  protected from overwrite.
+- After each major pass, use the app for several days before adding schema or
+  speculative automation.
 
-## macOS-specific priorities
+## macOS hardening backlog
 
-- macOS CI job (done)
-- Lazy-load Analytics/Settings routes
-- Bulk SQL over per-row DB calls; indexes on `tasks(status)`,
-  `tasks(due_at)`, `tasks(scheduled_date)`, `tasks(class_id, status)`,
-  `tasks(parent_task_id)`, `time_sessions(task_id, start_ts)`,
-  `time_sessions(start_ts)` (done in 0004 migration)
-- Sleep/wake and screen lock/unlock correctness for the persistent timer
-- Idle CPU target ~0%; menu bar updates once per minute, not every second
-- `PRAGMA optimize` periodically; avoid forced `VACUUM` on every launch;
-  monitor WAL growth
+- Validate sleep/wake and screen-lock timer recovery in the native app.
+- Keep idle CPU near zero; tray elapsed updates should remain minute-based.
+- Continue monitoring WAL growth and use `PRAGMA optimize` periodically.
+- Keep Analytics and Settings routes code-split as the app grows.

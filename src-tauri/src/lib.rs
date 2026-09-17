@@ -16,7 +16,8 @@ use commands::recurrence::{
     set_recurring_template_active, update_recurring_template,
 };
 use commands::tasks::{
-    create_task, delete_task, list_tasks_for_class, schedule_task, set_task_status, update_task,
+    create_task, delete_task, duplicate_task, list_inbox, list_tasks_for_class, schedule_task,
+    set_task_status, update_task,
 };
 use commands::today::get_today;
 use commands::todoist::{
@@ -29,7 +30,7 @@ use std::sync::Mutex;
 use tauri::Manager;
 use timer::{
     cancel_timer, edit_session_duration, finish_timer, get_active_session, list_sessions_for_task,
-    pause_timer, recover_timer, resume_timer, start_timer, switch_timer,
+    pause_timer, recover_timer, resume_timer, start_class_timer, start_timer, switch_timer,
 };
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -96,8 +97,10 @@ pub fn run() {
             update_class,
             archive_class,
             list_tasks_for_class,
+            list_inbox,
             create_task,
             update_task,
+            duplicate_task,
             schedule_task,
             set_task_status,
             delete_task,
@@ -112,6 +115,7 @@ pub fn run() {
             get_calendar,
             get_active_session,
             start_timer,
+            start_class_timer,
             switch_timer,
             recover_timer,
             pause_timer,

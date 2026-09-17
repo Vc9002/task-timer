@@ -18,6 +18,7 @@
 
   const navigation: Result[] = [
     { kind: "navigation", label: "Today", detail: "Due and planned work", href: "/" },
+    { kind: "navigation", label: "Inbox", detail: "Unscheduled work", href: "/inbox" },
     { kind: "navigation", label: "Week", detail: "Plan the next seven days", href: "/week" },
     { kind: "navigation", label: "Calendar", detail: "Monthly deadlines and study dates", href: "/calendar" },
     { kind: "navigation", label: "Classes", detail: "Courses and local tasks", href: "/classes" },

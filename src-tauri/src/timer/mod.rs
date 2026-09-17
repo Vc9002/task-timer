@@ -153,6 +153,50 @@ pub fn core_start_timer(conn: &Connection, task_id: i64) -> Result<ActiveSession
     build_active_info(conn, session).map_err(TimerError::from)
 }
 
+#[tauri::command]
+pub fn start_class_timer(
+    app: tauri::AppHandle,
+    db: State<Db>,
+    class_id: i64,
+) -> Result<ActiveSessionInfo, TimerError> {
+    let conn = db.0.lock().map_err(lock_err)?;
+    let class_exists: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM classes WHERE id=?1 AND active=1)",
+            [class_id],
+            |row| row.get(0),
+        )
+        .map_err(TimerError::from)?;
+    if !class_exists {
+        return Err(TimerError::Other {
+            message: "Class not found".into(),
+        });
+    }
+    let timer_task_id: i64 = match conn
+        .query_row(
+            "SELECT id FROM tasks WHERE class_id=?1 AND is_class_timer=1 LIMIT 1",
+            [class_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(TimerError::from)?
+    {
+        Some(id) => id,
+        None => {
+            conn.execute(
+                "INSERT INTO tasks(class_id,title,source,task_type,tags,is_class_timer)
+                 VALUES(?1,'Class timer','local','other','[]',1)",
+                [class_id],
+            )?;
+            conn.last_insert_rowid()
+        }
+    };
+    let result = core_start_timer(&conn, timer_task_id);
+    drop(conn);
+    crate::tray::changed(&app);
+    result
+}
+
 pub fn core_pause_timer(conn: &Connection) -> Result<ActiveSessionInfo, TimerError> {
     let session = find_active_session(conn)?.ok_or(TimerError::NotFound)?;
     if session.pause_started_ts.is_none() {

@@ -1,6 +1,6 @@
 use crate::{db::Db, timer};
 use serde::Serialize;
-use std::sync::Mutex;
+use std::{sync::Mutex, thread, time::Duration};
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::TrayIconBuilder,
@@ -89,7 +89,14 @@ fn refresh(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     state.label.set_text(
         active
             .as_ref()
-            .map(|a| format!("{} — {}", a.class_course_code, a.task_title))
+            .map(|a| {
+                format!(
+                    "{} — {} · {}",
+                    a.class_course_code,
+                    a.task_title,
+                    elapsed_label(a.elapsed_seconds)
+                )
+            })
             .unwrap_or_else(|| "No active timer".into()),
     )?;
     state
@@ -102,6 +109,11 @@ fn refresh(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     state.pause.set_enabled(active.is_some())?;
     state.finish.set_enabled(active.is_some())?;
     Ok(())
+}
+
+fn elapsed_label(seconds: i64) -> String {
+    let total_minutes = seconds.max(0) / 60;
+    format!("{}:{:02}", total_minutes / 60, total_minutes % 60)
 }
 
 pub fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
@@ -141,7 +153,15 @@ pub fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         finish,
         pending: Mutex::new(None),
     });
-    refresh(app)
+    refresh(app)?;
+    let handle = app.clone();
+    thread::spawn(move || loop {
+        thread::sleep(Duration::from_secs(60));
+        if refresh(&handle).is_err() {
+            break;
+        }
+    });
+    Ok(())
 }
 
 #[derive(Serialize)]
@@ -169,4 +189,16 @@ pub fn list_startable_tasks(db: tauri::State<Db>) -> Result<Vec<PickerTask>, Str
         .collect::<Result<Vec<_>, _>>()
         .map_err(|_| "Couldn't load tasks".into());
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::elapsed_label;
+
+    #[test]
+    fn elapsed_label_is_compact_and_minute_accurate() {
+        assert_eq!(elapsed_label(0), "0:00");
+        assert_eq!(elapsed_label(3661), "1:01");
+        assert_eq!(elapsed_label(-5), "0:00");
+    }
 }

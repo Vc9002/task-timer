@@ -69,7 +69,12 @@ export interface TaskRecord {
   tracked_seconds_direct: number;
   remaining_minutes: number | null;
   external_state: "active" | "completed" | "deleted" | "unknown";
+  task_type: TaskType;
+  tags: string[];
+  time_budget_minutes: number | null;
 }
+
+export type TaskType = "assignment" | "reading" | "problem_set" | "exam" | "project" | "other";
 
 export interface NewTask {
   class_id: number;
@@ -80,10 +85,19 @@ export interface NewTask {
   due_at: string | null;
   scheduled_date: string | null;
   estimated_minutes: number | null;
+  task_type?: TaskType;
+  tags?: string[];
+  time_budget_minutes?: number | null;
 }
 
 export function listTasksForClass(classId: number): Promise<TaskRecord[]> {
   return invoke("list_tasks_for_class", { classId });
+}
+
+export interface InboxTask extends TaskRecord { course_code: string; }
+
+export function listInbox(): Promise<InboxTask[]> {
+  return invoke("list_inbox");
 }
 
 export function createTask(input: NewTask): Promise<TaskRecord> {
@@ -98,10 +112,17 @@ export interface UpdateTask {
   due_at: string | null;
   scheduled_date: string | null;
   estimated_minutes: number | null;
+  task_type?: TaskType;
+  tags?: string[];
+  time_budget_minutes?: number | null;
 }
 
 export function updateTask(input: UpdateTask): Promise<TaskRecord> {
   return invoke("update_task", { input });
+}
+
+export function duplicateTask(id: number): Promise<TaskRecord> {
+  return invoke("duplicate_task", { id });
 }
 
 export function setTaskStatus(
@@ -243,6 +264,10 @@ export function getActiveSession(): Promise<ActiveSessionInfo | null> {
 
 export function startTimer(taskId: number): Promise<ActiveSessionInfo> {
   return invoke("start_timer", { taskId });
+}
+
+export function startClassTimer(classId: number): Promise<ActiveSessionInfo> {
+  return invoke("start_class_timer", { classId });
 }
 
 export function pauseTimer(): Promise<ActiveSessionInfo> {

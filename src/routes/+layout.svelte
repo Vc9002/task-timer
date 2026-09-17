@@ -13,11 +13,13 @@
   import "$lib/app.css";
   let pickerOpen = $state(false);
   let commandPaletteOpen = $state(false);
+  let focusMode = $state(false);
 
   let { children } = $props();
 
   onMount(() => {
     timerStore.mount();
+    focusMode = localStorage.getItem("tasktimer-focus-mode") === "true";
     let disposed = false;
     const unlisteners: UnlistenFn[] = [];
     const addListener = (promise: Promise<UnlistenFn>) => void promise.then(unlisten => { if (disposed) unlisten(); else unlisteners.push(unlisten); }).catch(() => timerStore.error = "Desktop controls couldn't connect. Reopen TaskTimer.");
@@ -49,8 +51,14 @@
   let recoveryMinutes = $state<number | undefined>(0);
   let quickAddOpen = $state(false);
 
+  function toggleFocusMode() {
+    focusMode = !focusMode;
+    localStorage.setItem("tasktimer-focus-mode", String(focusMode));
+  }
+
   const links = [
     { href: "/", label: "Today", icon: "today" },
+    { href: "/inbox", label: "Inbox", icon: "search" },
     { href: "/week", label: "Week", icon: "week" },
     { href: "/calendar", label: "Calendar", icon: "today" },
     { href: "/classes", label: "Classes", icon: "classes" },
@@ -120,10 +128,11 @@
     {#if timerStore.error}<p role="alert">{timerStore.error}</p>{/if}
   </Modal>
 {/if}
-<div class="shell">
+<div class="shell" class:focus-mode={focusMode}>
   <aside class="sidebar">
     <a href="/" class="brand"><span class="brand-icon"><Icon name="clock" size={21} /></span>TaskTimer</a>
     <button class="quick-add" onclick={openCommandPalette}><Icon name="search" size={16} /> Search &amp; commands <kbd>⌘ / Ctrl K</kbd></button>
+    <button class="focus-toggle" onclick={toggleFocusMode}>{focusMode ? "Exit Focus Mode" : "Focus Mode"}</button>
     <nav aria-label="Main navigation">
     {#each links as link}
       <a href={link.href} class:active={$page.url.pathname === link.href} aria-current={$page.url.pathname === link.href ? "page" : undefined}><Icon name={link.icon} />{link.label}</a>
@@ -142,6 +151,7 @@
       <span class="dot" class:paused={timerStore.active.is_paused}></span>
       <span class="label"><small>{timerStore.active.is_paused ? "Paused" : "Now tracking"} · {timerStore.active.class_course_code}</small><strong>{timerStore.active.task_title}</strong></span>
       <span class="clock">{formatHms(timerStore.displaySeconds)}</span>
+      <button onclick={toggleFocusMode}>{focusMode ? "Exit Focus" : "Focus"}</button>
       <button disabled={timerStore.busy} onclick={togglePause}><Icon name={timerStore.active.is_paused ? "play" : "pause"} size={15} />{timerStore.active.is_paused ? "Resume" : "Pause"}</button>
       <button disabled={timerStore.busy} onclick={finish} class="primary"><Icon name="check" size={16} />Finish</button>
     </div>
@@ -155,6 +165,8 @@
   .brand { display: flex; align-items: center; gap: 9px; padding: 0 8px 25px; font-size: 16px; letter-spacing: -.5px; font-weight: 700; text-decoration: none; color: var(--text); }
   .brand-icon { display: flex; color: var(--accent); }
   .quick-add { justify-content: flex-start; padding: 8px; font-size: 12px; margin-bottom: 25px; box-shadow: 0 1px 2px #122c4307; }
+  .focus-toggle { justify-content: flex-start; padding: 7px 8px; font-size: 11px; margin-top: -18px; margin-bottom: 20px; color: var(--muted); border-color: transparent; background: transparent; }
+  .focus-toggle:hover { color: var(--text); background: var(--hover); }
   .quick-add kbd { font-size: 9px; margin-left: auto; padding: 1px 2px; border: 0; }
   nav { display: grid; gap: 5px; }
   nav a { display: flex; align-items: center; gap: 10px; padding: 9px 12px; color: var(--muted); text-decoration: none; border-radius: 6px; font-size: 13px; font-weight: 500; }
@@ -163,6 +175,8 @@
   .sidebar-bottom { margin-top: auto; display: grid; gap: 10px; padding-top: 30px; }
   .sidebar-bottom .eyebrow { text-align: center; font-size: 9px; }
   .workspace { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .focus-mode .sidebar { display: none; }
+  .focus-mode .content { max-width: 1080px; width: 100%; margin-inline: auto; }
   .content { overflow-y: auto; flex: 1; }
   .app-error { padding: 8px 20px; border-bottom: 1px solid var(--line); }
   .timer-bar { display: flex; align-items: center; gap: 12px; flex-shrink: 0; padding: 16px 24px; border-top: 1px solid var(--line); background: var(--surface); }

@@ -1,6 +1,6 @@
 import {
   getActiveSession, startTimer, pauseTimer, resumeTimer, finishTimer,
-  cancelTimer, switchTimer, recoverTimer, type ActiveSessionInfo, type TimerError,
+  startClassTimer, cancelTimer, switchTimer, recoverTimer, type ActiveSessionInfo, type TimerError,
 } from "$lib/api";
 
 class TimerStore {
@@ -10,7 +10,7 @@ class TimerStore {
   error = $state("");
   recovery = $state(false);
   revision = $state(0);
-  conflict = $state<{ taskId: number; taskTitle: string; classCode: string; requestedId: number; requestedTitle: string; sessionId: number } | null>(null);
+  conflict = $state<{ taskId: number; taskTitle: string; classCode: string; requestedId: number; requestedClassId?: number; requestedTitle: string; sessionId: number } | null>(null);
   private fetchedAtMs = 0;
   private tickHandle: ReturnType<typeof setInterval> | null = null;
   private request = 0;
@@ -73,11 +73,37 @@ class TimerStore {
     return started;
   }
 
+  async startClass(classId: number, requestedTitle: string): Promise<boolean> {
+    let started = false;
+    await this.change(async () => {
+      this.conflict = null;
+      try {
+        this.applyActive(await startClassTimer(classId));
+        started = true;
+      } catch (e) {
+        const err = e as TimerError;
+        if (err?.kind !== "ActiveSessionConflict") throw e;
+        const current = await getActiveSession();
+        this.applyActive(current);
+        if (current) this.conflict = {
+          taskId: err.task_id, taskTitle: err.task_title, classCode: err.class_course_code,
+          requestedId: -classId, requestedClassId: classId, requestedTitle: `${requestedTitle} class timer`, sessionId: current.session.id,
+        };
+      }
+    });
+    return started;
+  }
+
   async switchToRequested() {
     const conflict = this.conflict;
     if (!conflict) return;
     await this.change(async () => {
-      this.applyActive(await switchTimer(conflict.sessionId, conflict.requestedId));
+      if (conflict.requestedClassId !== undefined) {
+        await finishTimer();
+        this.applyActive(await startClassTimer(conflict.requestedClassId));
+      } else {
+        this.applyActive(await switchTimer(conflict.sessionId, conflict.requestedId));
+      }
       this.conflict = null;
       this.recovery = false;
     });

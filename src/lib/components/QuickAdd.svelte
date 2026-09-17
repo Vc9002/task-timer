@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import Modal from "./Modal.svelte";
-  import { createTask, listClasses, listTasksForClass, type ClassRecord, type TaskRecord } from "$lib/api";
+  import { createTask, listClasses, listTasksForClass, type ClassRecord, type TaskRecord, type TaskType } from "$lib/api";
+  import { TASK_TYPES, parseTags } from "$lib/taskMetadata";
   import { timerStore } from "$lib/stores/timer.svelte";
   let { onclose }: { onclose: () => void } = $props();
   let classes = $state<ClassRecord[]>([]);
@@ -13,6 +14,9 @@
   let schedule = $state("today");
   let date = $state("");
   let estimate = $state<number | undefined>();
+  let budget = $state<number | undefined>();
+  let taskType = $state<TaskType>("assignment");
+  let tags = $state("");
   let error = $state("");
   let busy = $state(false);
   let parentRequest = 0;
@@ -33,7 +37,7 @@
     if (busy || classId === null) return;
     busy = true; error = "";
     try {
-      await createTask({ class_id: classId, parent_task_id: parentId, title: title.trim(), description: null, priority: null, due_at: due || null, scheduled_date: scheduledDate(), estimated_minutes: estimate ?? null });
+      await createTask({ class_id: classId, parent_task_id: parentId, title: title.trim(), description: null, priority: null, due_at: due || null, scheduled_date: scheduledDate(), estimated_minutes: estimate ?? null, task_type: taskType, tags: parseTags(tags), time_budget_minutes: budget ?? null });
       timerStore.revision++;
       window.dispatchEvent(new Event("tasks-changed"));
       onclose();
@@ -50,6 +54,9 @@
       {#if schedule === "date"}<label>Study date<input required type="date" bind:value={date} /></label>{/if}
       <label>Due date (optional)<input type="date" bind:value={due} /></label>
       <label>Estimate (minutes, optional)<input type="number" min="0" step="1" bind:value={estimate} /></label>
+      <label>Type<select bind:value={taskType}>{#each TASK_TYPES as type}<option value={type.value}>{type.label}</option>{/each}</select></label>
+      <label>Time budget (minutes, optional)<input type="number" min="0" step="1" bind:value={budget} /></label>
+      <label>Tags (comma-separated)<input placeholder="reading, exam" bind:value={tags} /></label>
       <label>Parent (optional)<select bind:value={parentId}><option value={null}>None</option>{#each parents as parent}<option value={parent.id}>{parent.title}</option>{/each}</select></label>
       {#if classes.length === 0}<p>Create a class in Classes first.</p>{/if}
       <button disabled={!title.trim() || classId === null} type="submit">{busy ? "Adding…" : "Add"}</button>
