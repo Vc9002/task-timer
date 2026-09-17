@@ -11,6 +11,12 @@ use commands::analytics::{
     get_analytics_month, get_analytics_today, get_analytics_week, get_day_view, get_task_history,
 };
 use commands::classes::{archive_class, create_class, list_classes, update_class};
+use commands::planning::{
+    create_study_block, create_task_milestone, create_task_template, delete_study_block,
+    delete_task_milestone, delete_task_template, get_study_blocks_for_range,
+    instantiate_task_template, list_study_blocks_for_task, list_task_milestones,
+    list_task_templates, move_task_milestone, update_study_block, update_task_milestone,
+};
 use commands::recurrence::{
     create_recurring_template, get_calendar, list_recurring_templates,
     set_recurring_template_active, update_recurring_template,
@@ -96,6 +102,20 @@ pub fn run() {
             create_class,
             update_class,
             archive_class,
+            create_study_block,
+            update_study_block,
+            delete_study_block,
+            list_study_blocks_for_task,
+            get_study_blocks_for_range,
+            list_task_milestones,
+            create_task_milestone,
+            update_task_milestone,
+            delete_task_milestone,
+            move_task_milestone,
+            list_task_templates,
+            create_task_template,
+            delete_task_template,
+            instantiate_task_template,
             list_tasks_for_class,
             list_inbox,
             create_task,

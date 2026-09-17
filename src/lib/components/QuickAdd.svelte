@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import Modal from "./Modal.svelte";
-  import { createTask, listClasses, listTasksForClass, type ClassRecord, type TaskRecord, type TaskType } from "$lib/api";
+  import { createTask, instantiateTaskTemplate, listClasses, listTaskTemplates, listTasksForClass, type ClassRecord, type TaskRecord, type TaskTemplate, type TaskType } from "$lib/api";
   import { TASK_TYPES, parseTags } from "$lib/taskMetadata";
   import { timerStore } from "$lib/stores/timer.svelte";
   let { onclose }: { onclose: () => void } = $props();
@@ -17,10 +17,14 @@
   let budget = $state<number | undefined>();
   let taskType = $state<TaskType>("assignment");
   let tags = $state("");
+  let templates = $state<TaskTemplate[]>([]);
+  let templateId = $state<number | null>(null);
   let error = $state("");
   let busy = $state(false);
   let parentRequest = 0;
-  onMount(() => { void listClasses().then(value => { classes = value; classId = value[0]?.id ?? null; void loadParents(); }).catch(() => error = "Couldn't load classes."); });
+  onMount(() => {
+    void Promise.all([listClasses(), listTaskTemplates()]).then(([classValue, templateValue]) => { classes = classValue; templates = templateValue; classId = classValue[0]?.id ?? null; void loadParents(); }).catch(() => error = "Couldn't load classes.");
+  });
   async function loadParents() {
     const request = ++parentRequest; parents = []; parentId = null;
     if (classId === null) return;
@@ -37,7 +41,11 @@
     if (busy || classId === null) return;
     busy = true; error = "";
     try {
-      await createTask({ class_id: classId, parent_task_id: parentId, title: title.trim(), description: null, priority: null, due_at: due || null, scheduled_date: scheduledDate(), estimated_minutes: estimate ?? null, task_type: taskType, tags: parseTags(tags), time_budget_minutes: budget ?? null });
+      if (templateId !== null) {
+        await instantiateTaskTemplate({ template_id: templateId, class_id: classId, title: title.trim(), due_at: due || null, scheduled_date: scheduledDate() });
+      } else {
+        await createTask({ class_id: classId, parent_task_id: parentId, title: title.trim(), description: null, priority: null, due_at: due || null, scheduled_date: scheduledDate(), estimated_minutes: estimate ?? null, task_type: taskType, tags: parseTags(tags), time_budget_minutes: budget ?? null });
+      }
       timerStore.revision++;
       window.dispatchEvent(new Event("tasks-changed"));
       onclose();
@@ -49,6 +57,7 @@
   <form onsubmit={e => { e.preventDefault(); void add(); }}>
     <fieldset disabled={busy}>
       <label>Task<input required bind:value={title} /></label>
+      {#if templates.length}<label>Template<select bind:value={templateId} onchange={() => { const template = templates.find(item => item.id === templateId); if (template) { taskType = template.task_type ?? "assignment"; estimate = template.default_estimated_minutes ?? undefined; budget = template.default_time_budget_minutes ?? undefined; tags = template.tags.join(", "); if (template.class_id) { classId = template.class_id; void loadParents(); } } }}><option value={null}>No template</option>{#each templates as template}<option value={template.id}>{template.name}</option>{/each}</select></label>{/if}
       <label>Class<select required bind:value={classId} onchange={() => loadParents()}>{#each classes as c}<option value={c.id}>{c.course_code}</option>{/each}</select></label>
       <label>Schedule<select bind:value={schedule}><option value="none">Not scheduled</option><option value="today">Today</option><option value="tomorrow">Tomorrow</option><option value="date">Pick date</option></select></label>
       {#if schedule === "date"}<label>Study date<input required type="date" bind:value={date} /></label>{/if}

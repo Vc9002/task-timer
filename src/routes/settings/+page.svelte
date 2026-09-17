@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import DesktopSettings from "$lib/components/DesktopSettings.svelte";
   import StudyCapacitySettings from "$lib/components/StudyCapacitySettings.svelte";
+  import TemplateSettings from "$lib/components/TemplateSettings.svelte";
   import {
     getTodoistStatus,
     setTodoistToken,
@@ -147,6 +148,7 @@
     {#if recurring.length}<ul class="recurring-list">{#each recurring as template (template.id)}<li><span><strong>{template.title}</strong><small>{template.recurrence_type} · {template.start_date}</small></span><span class="row"><button class="secondary" onclick={() => editRecurring(template)}>Edit</button><button class="secondary" onclick={() => { void setRecurringTemplateActive(template.id, !template.active).then(() => listRecurringTemplates().then(v => recurring = v)); }}>{template.active ? "Stop" : "Stopped"}</button></span></li>{/each}</ul>{/if}
   </section>
   <StudyCapacitySettings />
+  <TemplateSettings />
 
   {#if error}<p class="error">{error}</p>{/if}
 

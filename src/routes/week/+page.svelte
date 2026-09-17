@@ -106,7 +106,7 @@
         <h2>
           {label.weekday.toUpperCase()} {label.day}
           {#if day.date === today}<span class="today-badge">Today</span>{/if}
-          {#if day.tasks.length > 0}<span class="day-meta">{formatMinutesShort(day.estimated_minutes_remaining)} remaining</span>{/if}
+          {#if day.tasks.length > 0 || day.study_blocks.length > 0}<span class="day-meta">{formatMinutesShort(day.estimated_minutes_remaining)} remaining · {day.study_block_minutes}m blocked</span>{/if}
         </h2>
 
         {#if overloaded}
@@ -115,9 +115,12 @@
           </p>
         {/if}
 
-        {#if day.tasks.length === 0}
+        {#if day.study_blocks.length > 0}
+          <div class="blocks"><p class="section-label">STUDY BLOCKS</p>{#each day.study_blocks as block (block.id)}<div class="block"><span class="course">{block.course_code}</span><strong>{block.task_title}</strong><span class="meta">{block.planned_start_time ? `${block.planned_start_time} · ` : ""}{block.planned_minutes}m</span></div>{/each}</div>
+        {/if}
+        {#if day.tasks.length === 0 && day.study_blocks.length === 0}
           <p class="empty-day">Nothing scheduled.</p>
-        {:else}
+        {:else if day.tasks.length > 0}
           <ul>
             {#each day.tasks as task (task.id)}
               <li class:completed={task.status === "completed"}>
@@ -127,6 +130,7 @@
                   <span class="meta">
                     {#if task.remaining_minutes !== null}{task.remaining_minutes}m remaining{/if}
                     {#if task.due_at}· Due {new Date(task.due_at).toLocaleDateString(undefined, { weekday: "short" })}{/if}
+                    {#if task.unplanned_minutes > 0}· ⚠ {task.unplanned_minutes}m gap{/if}
                   </span>
                 </div>
                 <div class="reschedule">
@@ -187,6 +191,10 @@
   .nav button { border: 1px solid var(--line); background: var(--surface); border-radius: 6px; padding: 6px 10px; font-size: 12px; cursor: pointer; }
   .summary { display: flex; gap: 28px; padding: 17px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); margin-bottom: 20px; }
   .summary span { display: flex; flex-direction: column; gap: 3px; color: var(--muted); font-size: 11px; }
+  .section-label { margin: 0 0 5px; color: var(--muted); font-size: 9px; letter-spacing: .08em; font-weight: 700; }
+  .blocks { margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+  .block { display: flex; gap: 8px; align-items: baseline; padding: 5px 0; font-size: 12px; }
+  .block strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .summary strong { color: var(--text); font-size: 18px; letter-spacing: -.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
 
   .heatmap { display: flex; flex-direction: column; gap: 4px; margin-bottom: 26px; }

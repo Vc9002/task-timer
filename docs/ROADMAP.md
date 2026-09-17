@@ -2,9 +2,9 @@
 
 ## Current status — 2026-09-16
 
-The v0.3.3 productivity workflow is implemented in the current working tree,
-but it is not yet a release: the changes are uncommitted and native macOS
-real-use validation is still required. The browser shell has been smoke-tested;
+The v0.3.3 productivity workflow is on `main`. The next planning pass is
+implemented in the current working tree and still needs a native macOS
+real-use check and release commit. The browser shell has been smoke-tested;
 browser preview cannot exercise Tauri commands or the menu-bar process.
 
 Automated evidence currently passes:
@@ -13,9 +13,42 @@ Automated evidence currently passes:
 - `npm run build`
 - `cargo fmt --check`
 - `cargo clippy --all-targets --all-features -- -D warnings`
-- `cargo test --lib` — 58 passed
+- `cargo test --lib` — 61 passed
 
-The stable baseline before this working-tree pass is commit `bb14332`.
+The current committed baseline is `770ccfa`.
+
+## Next planning pass — Study Blocks, Risk, Milestones, Templates
+
+### Implemented in the working tree
+
+- Study Blocks are separate planning allocations with date, optional start
+  time, duration, edit/delete, and task-level coverage calculations.
+- Week and Calendar expose Study Blocks separately from Planned Tasks and Due
+  Tasks.
+- Incomplete tasks expose derived scheduled minutes before due, planning gap,
+  and schedule coverage percentage. This is deterministic schedule coverage,
+  not a probability.
+- Task planning includes milestone create/edit/complete/reorder/delete.
+- Task Templates can be created in Settings and instantiated from Quick Add.
+
+### New migrations
+
+- `0009_study_blocks`
+- `0010_task_milestones`
+- `0011_task_templates`
+
+### Release gate
+
+Before calling this pass released:
+
+1. Create multiple blocks for one task and verify they appear in Week and
+   Calendar without changing `scheduled_date`.
+2. Verify planning-gap math against a task with tracked time and blocks both
+   before and after its due date.
+3. Create, edit, complete, reorder, and delete milestones.
+4. Create a template, instantiate it from Quick Add, and verify its defaults.
+5. Run the automated checks, then perform the native macOS check on an
+   existing database.
 
 ## v0.3.3 — Productivity workflow
 

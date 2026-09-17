@@ -1,4 +1,5 @@
 use super::tasks::{row_to_task, Task, ELIGIBLE_TASK_CLAUSE, TASK_SELECT};
+use crate::commands::planning::StudyBlock;
 use crate::db::Db;
 use chrono::{Duration, NaiveDate};
 use rusqlite::Connection;
@@ -21,6 +22,9 @@ pub struct WeekTask {
     pub overdue: bool,
     pub context_only: bool,
     pub parent_path: Option<String>,
+    pub scheduled_minutes_before_due: i64,
+    pub unplanned_minutes: i64,
+    pub schedule_coverage_percent: i64,
 }
 
 #[derive(Debug, Serialize)]
@@ -31,6 +35,8 @@ pub struct WeekDay {
     pub tracked_seconds: i64,
     pub capacity_minutes: Option<i64>,
     pub load_percent: Option<i64>,
+    pub study_blocks: Vec<StudyBlock>,
+    pub study_block_minutes: i64,
 }
 
 #[derive(Debug, Serialize)]
@@ -90,6 +96,9 @@ fn to_week_task(
         overdue: overdue && not_completed,
         context_only,
         parent_path: (!path.is_empty()).then(|| path.join(" › ")),
+        scheduled_minutes_before_due: task.scheduled_minutes_before_due,
+        unplanned_minutes: task.unplanned_minutes,
+        schedule_coverage_percent: task.schedule_coverage_percent,
     })
 }
 
@@ -127,6 +136,8 @@ pub(crate) fn week_for(conn: &Connection, start_date: &str) -> rusqlite::Result<
     let today = chrono::Local::now().date_naive().to_string();
 
     let eligible = eligible_clause();
+    let study_blocks =
+        crate::commands::planning::blocks_for_range(conn, &start.to_string(), &end.to_string())?;
     let tasks: Vec<Task> = conn
         .prepare(&format!(
             "{TASK_SELECT} WHERE {eligible} AND t.status != 'completed' ORDER BY t.id"
@@ -223,6 +234,9 @@ pub(crate) fn week_for(conn: &Connection, start_date: &str) -> rusqlite::Result<
                 overdue: t.overdue,
                 context_only: t.context_only,
                 parent_path: t.parent_path.clone(),
+                scheduled_minutes_before_due: t.scheduled_minutes_before_due,
+                unplanned_minutes: t.unplanned_minutes,
+                schedule_coverage_percent: t.schedule_coverage_percent,
             })
             .collect();
         let estimated_minutes_remaining =
@@ -232,6 +246,12 @@ pub(crate) fn week_for(conn: &Connection, start_date: &str) -> rusqlite::Result<
         let load_percent = capacity_minutes
             .filter(|c| *c > 0)
             .map(|c| (estimated_minutes_remaining * 100) / c);
+        let day_blocks: Vec<StudyBlock> = study_blocks
+            .iter()
+            .filter(|block| block.planned_date == date_str)
+            .cloned()
+            .collect();
+        let study_block_minutes = day_blocks.iter().map(|block| block.planned_minutes).sum();
         per_day.push(WeekDay {
             date: date_str,
             tasks: day_tasks,
@@ -239,6 +259,8 @@ pub(crate) fn week_for(conn: &Connection, start_date: &str) -> rusqlite::Result<
             tracked_seconds,
             capacity_minutes,
             load_percent,
+            study_blocks: day_blocks,
+            study_block_minutes,
         });
     }
 
@@ -381,5 +403,32 @@ mod tests {
         .unwrap();
         let week = week_for(&c, "2026-09-14").unwrap();
         assert_eq!(week.days[1].capacity_minutes, Some(45));
+    }
+
+    #[test]
+    fn study_blocks_are_returned_on_their_planned_day() {
+        let c = db();
+        add(&c, 1, Some("2026-09-20"), None, Some(90));
+        c.execute("INSERT INTO study_blocks(task_id,planned_date,planned_start_time,planned_minutes) VALUES(1,'2026-09-15','18:00',60)", []).unwrap();
+        let week = week_for(&c, "2026-09-14").unwrap();
+        assert_eq!(week.days[1].study_blocks.len(), 1);
+        assert_eq!(week.days[1].study_block_minutes, 60);
+        assert_eq!(
+            week.days[1].study_blocks[0].planned_start_time.as_deref(),
+            Some("18:00")
+        );
+    }
+
+    #[test]
+    fn schedule_gap_uses_blocks_before_due_and_direct_tracking() {
+        let c = db();
+        add(&c, 1, Some("2026-09-20"), None, Some(120));
+        c.execute("INSERT INTO study_blocks(task_id,planned_date,planned_minutes) VALUES(1,'2026-09-15',60)", []).unwrap();
+        c.execute("INSERT INTO time_sessions(task_id,start_ts,end_ts,final_duration_seconds) VALUES(1,'2026-09-14','2026-09-14 00:30',1800)", []).unwrap();
+        let week = week_for(&c, "2026-09-14").unwrap();
+        assert_eq!(week.unscheduled[0].remaining_minutes, Some(90));
+        assert_eq!(week.unscheduled[0].scheduled_minutes_before_due, 60);
+        assert_eq!(week.unscheduled[0].unplanned_minutes, 30);
+        assert_eq!(week.unscheduled[0].schedule_coverage_percent, 66);
     }
 }

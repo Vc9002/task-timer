@@ -35,6 +35,18 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "0008_class_timers",
         include_str!("migrations/0008_class_timers.sql"),
     ),
+    (
+        "0009_study_blocks",
+        include_str!("migrations/0009_study_blocks.sql"),
+    ),
+    (
+        "0010_task_milestones",
+        include_str!("migrations/0010_task_milestones.sql"),
+    ),
+    (
+        "0011_task_templates",
+        include_str!("migrations/0011_task_templates.sql"),
+    ),
 ];
 
 pub fn open(app_data_dir: &Path) -> rusqlite::Result<Connection> {
@@ -186,5 +198,45 @@ mod tests {
             .unwrap(),
             60
         );
+    }
+
+    #[test]
+    fn planning_upgrade_preserves_tasks_and_sessions() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "PRAGMA foreign_keys=ON; CREATE TABLE schema_migrations(name TEXT PRIMARY KEY);",
+        )
+        .unwrap();
+        for (name, sql) in &MIGRATIONS[..8] {
+            apply_migration(&conn, name, sql).unwrap();
+        }
+        conn.execute_batch("INSERT INTO classes(id,course_code,semester) VALUES(1,'LGST 1000','Fall 2026'); INSERT INTO tasks(id,class_id,title) VALUES(1,1,'Brief'); INSERT INTO time_sessions(task_id,start_ts,end_ts,final_duration_seconds) VALUES(1,'2026-09-15','2026-09-15 01:00',3600);")
+            .unwrap();
+        run_migrations(&conn).unwrap();
+        assert_eq!(
+            conn.query_row("SELECT count(*) FROM tasks", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            conn.query_row(
+                "SELECT final_duration_seconds FROM time_sessions",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+            3600
+        );
+        for table in ["study_blocks", "task_milestones", "task_templates"] {
+            assert_eq!(
+                conn.query_row(
+                    "SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?1",
+                    [table],
+                    |r| r.get::<_, i64>(0)
+                )
+                .unwrap(),
+                1
+            );
+        }
     }
 }

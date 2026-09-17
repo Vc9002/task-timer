@@ -72,6 +72,9 @@ export interface TaskRecord {
   task_type: TaskType;
   tags: string[];
   time_budget_minutes: number | null;
+  scheduled_minutes_before_due: number;
+  unplanned_minutes: number;
+  schedule_coverage_percent: number;
 }
 
 export type TaskType = "assignment" | "reading" | "problem_set" | "exam" | "project" | "other";
@@ -136,6 +139,35 @@ export function deleteTask(id: number): Promise<void> {
   return invoke("delete_task", { id });
 }
 
+export interface StudyBlock {
+  id: number; task_id: number; task_title: string; class_id: number; course_code: string;
+  planned_date: string; planned_start_time: string | null; planned_minutes: number; completed: boolean;
+}
+export interface NewStudyBlock { task_id: number; planned_date: string; planned_start_time: string | null; planned_minutes: number; }
+export interface UpdateStudyBlock extends Omit<NewStudyBlock, "task_id"> { id: number; completed: boolean; }
+export function createStudyBlock(input: NewStudyBlock): Promise<StudyBlock> { return invoke("create_study_block", { input }); }
+export function updateStudyBlock(input: UpdateStudyBlock): Promise<StudyBlock> { return invoke("update_study_block", { input }); }
+export function deleteStudyBlock(id: number): Promise<void> { return invoke("delete_study_block", { id }); }
+export function listStudyBlocksForTask(taskId: number): Promise<StudyBlock[]> { return invoke("list_study_blocks_for_task", { taskId }); }
+export function getStudyBlocksForRange(startDate: string, endDate: string): Promise<StudyBlock[]> { return invoke("get_study_blocks_for_range", { startDate, endDate }); }
+
+export interface TaskMilestone { id: number; task_id: number; title: string; target_date: string | null; position: number; completed: boolean; completed_at: string | null; }
+export interface NewMilestone { task_id: number; title: string; target_date: string | null; }
+export interface UpdateMilestone { id: number; title: string; target_date: string | null; completed: boolean; }
+export function listTaskMilestones(taskId: number): Promise<TaskMilestone[]> { return invoke("list_task_milestones", { taskId }); }
+export function createTaskMilestone(input: NewMilestone): Promise<TaskMilestone> { return invoke("create_task_milestone", { input }); }
+export function updateTaskMilestone(input: UpdateMilestone): Promise<TaskMilestone> { return invoke("update_task_milestone", { input }); }
+export function deleteTaskMilestone(id: number): Promise<void> { return invoke("delete_task_milestone", { id }); }
+export function moveTaskMilestone(id: number, direction: "up" | "down"): Promise<void> { return invoke("move_task_milestone", { id, direction }); }
+
+export interface TaskTemplate { id: number; name: string; class_id: number | null; task_type: TaskType | null; default_estimated_minutes: number | null; default_time_budget_minutes: number | null; priority: number | null; tags: string[]; }
+export interface NewTaskTemplate { name: string; class_id: number | null; task_type: TaskType | null; default_estimated_minutes: number | null; default_time_budget_minutes: number | null; priority: number | null; tags: string[]; }
+export interface InstantiateTemplate { template_id: number; class_id: number; title: string; due_at: string | null; scheduled_date: string | null; }
+export function listTaskTemplates(): Promise<TaskTemplate[]> { return invoke("list_task_templates"); }
+export function createTaskTemplate(input: NewTaskTemplate): Promise<TaskTemplate> { return invoke("create_task_template", { input }); }
+export function deleteTaskTemplate(id: number): Promise<void> { return invoke("delete_task_template", { id }); }
+export function instantiateTaskTemplate(input: InstantiateTemplate): Promise<TaskRecord> { return invoke("instantiate_task_template", { input }); }
+
 // ---------- Today ----------
 
 export interface TodayTask extends TaskRecord {
@@ -178,7 +210,12 @@ export interface WeekTask {
   overdue: boolean;
   context_only?: boolean;
   parent_path?: string | null;
+  scheduled_minutes_before_due: number;
+  unplanned_minutes: number;
+  schedule_coverage_percent: number;
 }
+
+export interface WeekStudyBlock extends StudyBlock {}
 
 export interface WeekDay {
   date: string;
@@ -187,6 +224,8 @@ export interface WeekDay {
   tracked_seconds: number;
   capacity_minutes: number | null;
   load_percent: number | null;
+  study_blocks: WeekStudyBlock[];
+  study_block_minutes: number;
 }
 
 export interface WeekSummary {
@@ -229,7 +268,7 @@ export function createRecurringTemplate(input: NewRecurringTemplate): Promise<Re
 export function setRecurringTemplateActive(id: number, active: boolean): Promise<void> { return invoke("set_recurring_template_active", { id, active }); }
 export interface UpdateRecurringTemplate extends NewRecurringTemplate { id: number; }
 export function updateRecurringTemplate(input: UpdateRecurringTemplate): Promise<RecurringTemplate> { return invoke("update_recurring_template", { input }); }
-export interface CalendarDay { date: string; planned: TaskRecord[]; due: TaskRecord[]; }
+export interface CalendarDay { date: string; planned: TaskRecord[]; due: TaskRecord[]; study_blocks: StudyBlock[]; }
 export function getCalendar(month: string): Promise<CalendarDay[]> { return invoke("get_calendar", { month }); }
 
 // ---------- Timer ----------

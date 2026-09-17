@@ -215,6 +215,7 @@ pub struct CalendarDay {
     pub date: String,
     pub planned: Vec<Task>,
     pub due: Vec<Task>,
+    pub study_blocks: Vec<crate::commands::planning::StudyBlock>,
 }
 #[tauri::command]
 pub fn get_calendar(db: State<Db>, month: String) -> Result<Vec<CalendarDay>, String> {
@@ -226,6 +227,12 @@ pub fn get_calendar(db: State<Db>, month: String) -> Result<Vec<CalendarDay>, St
     let c = db.0.lock().map_err(|_| "Couldn't load calendar")?;
     ensure_generated(&c, 45).map_err(|_| "Couldn't prepare recurring tasks")?;
     let tasks:Vec<Task>=c.prepare(&format!("{TASK_SELECT} WHERE {ELIGIBLE_TASK_CLAUSE} AND t.status != 'completed' AND ((t.scheduled_date >= ?1 AND t.scheduled_date < ?2) OR (substr(t.due_at,1,10) >= ?1 AND substr(t.due_at,1,10) < ?2)) ORDER BY t.id")).map_err(|_| "Couldn't load calendar tasks")?.query_map(params![first.to_string(),next.to_string()],row_to_task).map_err(|_| "Couldn't load calendar tasks")?.collect::<Result<_,_>>().map_err(|_| "Couldn't load calendar tasks")?;
+    let study_blocks = crate::commands::planning::blocks_for_range(
+        &c,
+        &first.to_string(),
+        &(next - Duration::days(1)).to_string(),
+    )
+    .map_err(|_| "Couldn't load calendar study blocks")?;
     let mut out = Vec::new();
     let mut d = first;
     while d < next {
@@ -241,9 +248,14 @@ pub fn get_calendar(db: State<Db>, month: String) -> Result<Vec<CalendarDay>, St
             .cloned()
             .collect();
         out.push(CalendarDay {
-            date: key,
+            date: key.clone(),
             planned,
             due,
+            study_blocks: study_blocks
+                .iter()
+                .filter(|block| block.planned_date == key)
+                .cloned()
+                .collect(),
         });
         d += Duration::days(1);
     }

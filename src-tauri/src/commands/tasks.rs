@@ -24,6 +24,9 @@ pub struct Task {
     pub task_type: String,
     pub tags: Vec<String>,
     pub time_budget_minutes: Option<i64>,
+    pub scheduled_minutes_before_due: i64,
+    pub unplanned_minutes: i64,
+    pub schedule_coverage_percent: i64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -73,7 +76,12 @@ pub(crate) const TASK_SELECT: &str = "SELECT t.*, (
 ) AS tracked_seconds, (
     SELECT COALESCE(SUM(final_duration_seconds),0) FROM time_sessions
       WHERE end_ts IS NOT NULL AND task_id = t.id
-) AS tracked_seconds_direct FROM tasks t";
+) AS tracked_seconds_direct,
+    CASE WHEN t.due_at IS NULL THEN 0 ELSE COALESCE((
+        SELECT SUM(sb.planned_minutes) FROM study_blocks sb
+        WHERE sb.task_id = t.id AND sb.planned_date <= substr(t.due_at, 1, 10)
+    ), 0) END AS scheduled_minutes_before_due
+    FROM tasks t";
 
 pub(crate) const ELIGIBLE_TASK_CLAUSE: &str = "t.class_id IN (SELECT id FROM classes WHERE active=1) AND
     t.is_class_timer = 0 AND
@@ -86,6 +94,14 @@ pub(crate) fn row_to_task(row: &rusqlite::Row) -> rusqlite::Result<Task> {
     let remaining_minutes = estimated_minutes.map(|e| (e - tracked_seconds_direct / 60).max(0));
     let tags_json: String = row.get("tags")?;
     let tags = serde_json::from_str(&tags_json).unwrap_or_default();
+    let scheduled_minutes_before_due: i64 = row.get("scheduled_minutes_before_due")?;
+    let remaining_minutes = remaining_minutes.unwrap_or(0);
+    let unplanned_minutes = (remaining_minutes - scheduled_minutes_before_due).max(0);
+    let schedule_coverage_percent = if remaining_minutes > 0 {
+        ((scheduled_minutes_before_due * 100) / remaining_minutes).min(100)
+    } else {
+        100
+    };
     Ok(Task {
         id: row.get("id")?,
         class_id: row.get("class_id")?,
@@ -102,11 +118,14 @@ pub(crate) fn row_to_task(row: &rusqlite::Row) -> rusqlite::Result<Task> {
         completed_at: row.get("completed_at")?,
         tracked_seconds: row.get("tracked_seconds")?,
         tracked_seconds_direct,
-        remaining_minutes,
+        remaining_minutes: estimated_minutes.map(|_| remaining_minutes),
         external_state: row.get("external_state")?,
         task_type: row.get("task_type")?,
         tags,
         time_budget_minutes: row.get("time_budget_minutes")?,
+        scheduled_minutes_before_due,
+        unplanned_minutes,
+        schedule_coverage_percent,
     })
 }
 
