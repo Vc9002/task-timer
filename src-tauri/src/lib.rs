@@ -8,14 +8,18 @@ mod todoist;
 mod tray;
 
 use commands::analytics::{
-    get_analytics_month, get_analytics_today, get_analytics_week, get_day_view, get_task_history,
+    get_analytics_month, get_analytics_today, get_analytics_week, get_day_view,
+    get_estimate_analytics, get_estimate_suggestion, get_task_history, get_weekly_review,
 };
 use commands::classes::{archive_class, create_class, list_classes, update_class};
+use commands::exams::{create_exam, delete_exam, get_semester_dashboard, list_exams};
+use commands::planner::{apply_plan, get_plan_proposal};
 use commands::planning::{
-    create_study_block, create_task_milestone, create_task_template, delete_study_block,
-    delete_task_milestone, delete_task_template, get_study_blocks_for_range,
-    instantiate_task_template, list_study_blocks_for_task, list_task_milestones,
-    list_task_templates, move_task_milestone, update_study_block, update_task_milestone,
+    create_study_block, create_task_milestone, create_task_template, create_template_milestone,
+    delete_study_block, delete_task_milestone, delete_task_template, delete_template_milestone,
+    get_study_blocks_for_range, instantiate_task_template, list_study_blocks_for_task,
+    list_task_milestones, list_task_templates, list_template_milestones, move_task_milestone,
+    update_study_block, update_task_milestone,
 };
 use commands::recurrence::{
     create_recurring_template, get_calendar, list_recurring_templates,
@@ -27,8 +31,8 @@ use commands::tasks::{
 };
 use commands::today::get_today;
 use commands::todoist::{
-    complete_todoist_task, disconnect_todoist, get_todoist_status, list_todoist_project_mappings,
-    map_todoist_project, set_todoist_token, sync_todoist_now,
+    complete_todoist_task, disconnect_todoist, get_todoist_outbox_status, get_todoist_status,
+    list_todoist_project_mappings, map_todoist_project, set_todoist_token, sync_todoist_now,
 };
 use commands::week::{get_study_capacity, get_week, set_study_capacity};
 use db::Db;
@@ -102,6 +106,10 @@ pub fn run() {
             create_class,
             update_class,
             archive_class,
+            list_exams,
+            create_exam,
+            delete_exam,
+            get_semester_dashboard,
             create_study_block,
             update_study_block,
             delete_study_block,
@@ -116,6 +124,11 @@ pub fn run() {
             create_task_template,
             delete_task_template,
             instantiate_task_template,
+            list_template_milestones,
+            create_template_milestone,
+            delete_template_milestone,
+            get_plan_proposal,
+            apply_plan,
             list_tasks_for_class,
             list_inbox,
             create_task,
@@ -149,7 +162,11 @@ pub fn run() {
             get_analytics_month,
             get_day_view,
             get_task_history,
+            get_estimate_analytics,
+            get_estimate_suggestion,
+            get_weekly_review,
             get_todoist_status,
+            get_todoist_outbox_status,
             set_todoist_token,
             disconnect_todoist,
             list_todoist_project_mappings,

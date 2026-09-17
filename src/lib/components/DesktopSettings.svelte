@@ -53,7 +53,7 @@
         {#each ["Start / Switch Task", "Pause / Resume", "Finish Timer"] as label, i}
           <label>{label}<input bind:value={settings.shortcuts[i]} spellcheck="false" /></label>
         {/each}
-        <p>Use CommandOrControl+Shift+T format. Leave blank to disable an action. Cmd/Ctrl+K opens Quick Add inside TaskTimer.</p>
+        <p>Use CommandOrControl+Shift+Y format. Start / Switch defaults to Cmd/Ctrl+Shift+Y so Chrome can keep Cmd/Ctrl+Shift+T for reopening a closed tab. Leave blank to disable an action. Cmd/Ctrl+K opens Quick Add inside TaskTimer.</p>
         <button type="submit">Save desktop settings</button>
       </fieldset>
     </form>

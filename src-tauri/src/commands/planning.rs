@@ -347,6 +347,84 @@ pub struct InstantiateTemplate {
     pub scheduled_date: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct TemplateMilestone {
+    pub id: i64,
+    pub template_id: i64,
+    pub title: String,
+    pub offset_days_before_due: Option<i64>,
+    pub position: i64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct NewTemplateMilestone {
+    pub template_id: i64,
+    pub title: String,
+    pub offset_days_before_due: Option<i64>,
+}
+
+fn template_milestone_row(row: &rusqlite::Row) -> rusqlite::Result<TemplateMilestone> {
+    Ok(TemplateMilestone {
+        id: row.get("id")?,
+        template_id: row.get("template_id")?,
+        title: row.get("title")?,
+        offset_days_before_due: row.get("offset_days_before_due")?,
+        position: row.get("position")?,
+    })
+}
+
+#[tauri::command]
+pub fn list_template_milestones(
+    db: State<Db>,
+    template_id: i64,
+) -> Result<Vec<TemplateMilestone>, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let result = conn
+        .prepare("SELECT * FROM task_template_milestones WHERE template_id=?1 ORDER BY position,id")
+        .map_err(|e| e.to_string())?
+        .query_map([template_id], template_milestone_row)
+        .map_err(|e| e.to_string())?
+        .collect::<Result<_, _>>()
+        .map_err(|e| e.to_string());
+    result
+}
+
+#[tauri::command]
+pub fn create_template_milestone(
+    db: State<Db>,
+    input: NewTemplateMilestone,
+) -> Result<TemplateMilestone, String> {
+    if input.title.trim().is_empty() {
+        return Err("Milestone title cannot be empty.".into());
+    }
+    if input.offset_days_before_due.is_some_and(|days| days < 0) {
+        return Err("Offset must be zero or greater.".into());
+    }
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let position: i64 = conn
+        .query_row(
+            "SELECT COALESCE(MAX(position)+1,0) FROM task_template_milestones WHERE template_id=?1",
+            [input.template_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    conn.execute("INSERT INTO task_template_milestones(template_id,title,offset_days_before_due,position) VALUES(?1,?2,?3,?4)", params![input.template_id,input.title.trim(),input.offset_days_before_due,position]).map_err(|e| e.to_string())?;
+    conn.query_row(
+        "SELECT * FROM task_template_milestones WHERE id=?1",
+        [conn.last_insert_rowid()],
+        template_milestone_row,
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn delete_template_milestone(db: State<Db>, id: i64) -> Result<(), String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM task_template_milestones WHERE id=?1", [id])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 fn template_row(row: &rusqlite::Row) -> rusqlite::Result<TaskTemplate> {
     let tags: String = row.get("tags")?;
     Ok(TaskTemplate {

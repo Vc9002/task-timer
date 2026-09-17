@@ -1,5 +1,6 @@
 <script lang="ts">
   import { getWeek, scheduleTask, type WeekSummary, type WeekTask } from "$lib/api";
+  import PlannerPanel from "$lib/components/PlannerPanel.svelte";
   import { formatMinutesShort, formatDurationShort, localDate } from "$lib/format";
   import { timerStore } from "$lib/stores/timer.svelte";
 
@@ -7,6 +8,7 @@
   let error = $state("");
   let startDate = $state(mondayOf(new Date()));
   let reschedulingId = $state<number | null>(null);
+  let planning = $state(false);
 
   function mondayOf(date: Date): string {
     const d = new Date(date);
@@ -69,6 +71,7 @@
       <h1>Week</h1>
     </div>
     <div class="nav">
+      <button class="plan-button" onclick={() => planning = !planning}>{planning ? "Hide plan" : "Plan my week"}</button>
       <button onclick={() => shiftWeek(-7)} aria-label="Previous week">←</button>
       <button onclick={() => (startDate = mondayOf(new Date()))}>This week</button>
       <button onclick={() => shiftWeek(7)} aria-label="Next week">→</button>
@@ -76,6 +79,8 @@
   </header>
 
   {#if error}<p class="error">{error}</p>{/if}
+
+  {#if planning}<PlannerPanel startDate={startDate} days={7} onclose={() => planning = false} onapplied={refresh} />{/if}
 
   {#if week}
     <div class="summary">

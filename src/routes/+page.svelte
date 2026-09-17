@@ -1,11 +1,13 @@
 <script lang="ts">
   import TaskTreeNode from "$lib/components/TaskTreeNode.svelte";
+  import PlannerPanel from "$lib/components/PlannerPanel.svelte";
   import { getToday, type TodaySummary } from "$lib/api";
   import { timerStore } from "$lib/stores/timer.svelte";
-  import { formatDurationShort } from "$lib/format";
+  import { formatDurationShort, localDate } from "$lib/format";
 
   let today = $state<TodaySummary | null>(null);
   let error = $state("");
+  let planning = $state(false);
 
   async function refresh() {
     try {
@@ -28,12 +30,14 @@
 <main class="container">
   <header>
     <div><p class="eyebrow">Your coursework</p><h1>Today</h1></div>
-    <span class="date">{todayDate}</span>
+    <div class="today-actions"><button onclick={() => planning = !planning}>{planning ? "Hide plan" : "Plan my day"}</button><span class="date">{todayDate}</span></div>
   </header>
 
   {#if error}
     <p class="error">{error}</p>
   {/if}
+
+  {#if planning}<PlannerPanel startDate={localDate()} days={1} onclose={() => planning = false} onapplied={refresh} />{/if}
 
   {#if today}
     <div class="summary">
@@ -81,6 +85,7 @@
 
 <style>
 header { display: flex; justify-content: space-between; align-items: end; gap: 15px; margin-bottom: 24px; }
+  .today-actions { display: flex; align-items: center; gap: 12px; }
   .date { color: var(--muted); font-size: 12px; }
   .summary { display: flex; gap: 28px; padding: 17px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); margin-bottom: 30px; }
   .summary span { display: flex; flex-direction: column; gap: 3px; color: var(--muted); font-size: 11px; }

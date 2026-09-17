@@ -19,7 +19,7 @@ impl Default for Settings {
             close_to_tray: cfg!(any(target_os = "macos", target_os = "windows")),
             start_hidden: false,
             shortcuts: [
-                "CommandOrControl+Shift+T".into(),
+                "CommandOrControl+Shift+Y".into(),
                 "CommandOrControl+Shift+Space".into(),
                 "CommandOrControl+Shift+F".into(),
             ],
@@ -46,7 +46,7 @@ fn parse_shortcuts(settings: &Settings) -> Result<Vec<(Shortcut, usize)>, String
         }
         let shortcut: Shortcut = text
             .parse()
-            .map_err(|_| "Invalid shortcut. Use CommandOrControl+Shift+T, for example.")?;
+            .map_err(|_| "Invalid shortcut. Use CommandOrControl+Shift+Y, for example.")?;
         if shortcut.mods.is_empty() {
             return Err("Global shortcuts must include a modifier key.".into());
         }
@@ -75,9 +75,20 @@ pub fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                 |r| r.get(0),
             )
             .optional()?;
-        json.map(|s| serde_json::from_str::<Settings>(&s))
+        let mut settings = json
+            .map(|s| serde_json::from_str::<Settings>(&s))
             .transpose()?
-            .unwrap_or_default()
+            .unwrap_or_default();
+        // Cmd/Ctrl+Shift+T is Chrome's reopen-closed-tab shortcut. Migrate
+        // only the shipped default; preserve any user-selected shortcut.
+        if settings.shortcuts[0] == "CommandOrControl+Shift+T" {
+            settings.shortcuts[0] = "CommandOrControl+Shift+Y".into();
+            conn.execute(
+                "INSERT INTO app_settings(key,value) VALUES('desktop_v02',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                [serde_json::to_string(&settings)?],
+            )?;
+        }
+        settings
     };
     let mut warning = None;
     match parse_shortcuts(&settings) {

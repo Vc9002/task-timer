@@ -64,6 +64,7 @@
     { href: "/classes", label: "Classes", icon: "classes" },
     { href: "/history", label: "History", icon: "history" },
     { href: "/analytics", label: "Analytics", icon: "analytics" },
+    { href: "/semester", label: "Semester", icon: "classes" },
     { href: "/settings", label: "Settings", icon: "settings" },
   ];
 

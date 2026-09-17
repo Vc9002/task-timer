@@ -1,79 +1,25 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import {
-    getAnalyticsToday,
-    getAnalyticsWeek,
-    getAnalyticsMonth,
-    type RangeSummary,
-  } from "$lib/api";
-  import { formatDurationShort } from "$lib/format";
-
+  import { getAnalyticsToday, getAnalyticsWeek, getAnalyticsMonth, getEstimateAnalytics, getWeeklyReview, type EstimateAnalytics, type RangeSummary, type WeeklyReview } from "$lib/api";
+  import { formatDurationShort, formatMinutesShort, localDate } from "$lib/format";
   type RangeKey = "today" | "week" | "month";
-  let range = $state<RangeKey>("week");
-  let summary = $state<RangeSummary | null>(null);
-  let error = $state("");
-
-  async function load() {
-    try {
-      summary =
-        range === "today"
-          ? await getAnalyticsToday()
-          : range === "week"
-            ? await getAnalyticsWeek()
-            : await getAnalyticsMonth();
-      error = "";
-    } catch (e) {
-      error = String(e);
-    }
-  }
-
-  function setRange(r: RangeKey) {
-    range = r;
-    load();
-  }
-
-  onMount(load);
+  let range = $state<RangeKey>("week"); let summary = $state<RangeSummary | null>(null); let intelligence = $state<EstimateAnalytics | null>(null); let review = $state<WeeklyReview | null>(null); let error = $state(""); let loading = $state(false);
+  function mondayOf(date: Date): Date { const value = new Date(date); value.setDate(value.getDate() - ((value.getDay() + 6) % 7)); return value; }
+  function dateRange(): [string, string] { const now = new Date(); if (range === "today") return [localDate(now), localDate(now)]; if (range === "week") { const start = mondayOf(now); const end = new Date(start); end.setDate(end.getDate() + 6); return [localDate(start), localDate(end)]; } return [localDate(new Date(now.getFullYear(), now.getMonth(), 1)), localDate(new Date(now.getFullYear(), now.getMonth() + 1, 0))]; }
+  async function load() { loading = true; try { const [start, end] = dateRange(); summary = range === "today" ? await getAnalyticsToday() : range === "week" ? await getAnalyticsWeek() : await getAnalyticsMonth(); intelligence = await getEstimateAnalytics(start, end); review = range === "week" ? await getWeeklyReview(start) : null; error = ""; } catch (e) { error = String(e); } finally { loading = false; } }
+  function setRange(value: RangeKey) { range = value; void load(); } onMount(() => { void load(); });
 </script>
 
 <main class="container">
-  <h1>Analytics</h1>
-  <p class="page-intro">See how your study time adds up.</p>
-
-  <div class="tabs">
-    <button class:active={range === "today"} onclick={() => setRange("today")}>Today</button>
-    <button class:active={range === "week"} onclick={() => setRange("week")}>This Week</button>
-    <button class:active={range === "month"} onclick={() => setRange("month")}>This Month</button>
-  </div>
-
-  {#if error}<p class="error">{error}</p>{/if}
-
-  {#if summary}
-    <p class="total">Total tracked<strong>{formatDurationShort(summary.tracked_seconds_total)}</strong></p>
-
-    <ul class="by-class">
-      {#each summary.by_class as c (c.class_id)}
-        <li>
-          <span>{c.course_code}</span>
-          <span class="duration">{formatDurationShort(c.tracked_seconds)}</span>
-          <div class="bar" aria-hidden="true"><span style:width={`${summary.tracked_seconds_total > 0 ? c.tracked_seconds / summary.tracked_seconds_total * 100 : 0}%`}></span></div>
-        </li>
-      {/each}
-      {#if summary.by_class.length === 0}
-        <li class="empty">No tracked time in this range yet.</li>
-      {/if}
-    </ul>
-  {/if}
+  <p class="eyebrow">Time intelligence</p><h1>Analytics</h1><p class="page-intro">Compare what you planned with what the work actually took.</p>
+  <div class="tabs" aria-label="Analytics range"><button class:active={range === "today"} onclick={() => setRange("today")}>Today</button><button class:active={range === "week"} onclick={() => setRange("week")}>This week</button><button class:active={range === "month"} onclick={() => setRange("month")}>This month</button></div>
+  {#if loading}<p class="muted">Updating the ledger…</p>{/if}{#if error}<p class="error">{error}</p>{/if}
+  {#if summary}<section class="hero-grid"><article class="hero-card"><span class="eyebrow">Tracked</span><strong>{formatDurationShort(summary.tracked_seconds_total)}</strong><small>{range === "week" ? "this week" : range === "today" ? "today" : "this month"}</small></article><article class="metric-card"><span>Completed estimates</span><strong>{intelligence?.sample_count ?? 0}</strong><small>tasks with estimate + finished time</small></article><article class="metric-card"><span>Typical estimate error</span><strong>{intelligence?.median_error_percent !== undefined ? `${intelligence.median_error_percent > 0 ? "+" : ""}${intelligence.median_error_percent}%` : "—"}</strong><small>median actual vs estimate</small></article></section>
+    <section><h2>Where time went</h2><ul class="by-class">{#each summary.by_class as c (c.class_id)}<li><span>{c.course_code}</span><span class="duration">{formatDurationShort(c.tracked_seconds)}</span><div class="bar"><span style:width={`${summary.tracked_seconds_total > 0 ? c.tracked_seconds / summary.tracked_seconds_total * 100 : 0}%`}></span></div></li>{:else}<li class="empty">No tracked time in this range yet.</li>{/each}</ul></section>{/if}
+  {#if intelligence}<section><h2>Estimate accuracy</h2><div class="stats-row"><span><b>{formatMinutesShort(intelligence.median_estimated_minutes)}</b>median estimate</span><span><b>{formatMinutesShort(intelligence.median_actual_minutes)}</b>median actual</span><span><b>{intelligence.median_difference_minutes > 0 ? "+" : ""}{formatMinutesShort(Math.abs(intelligence.median_difference_minutes))}</b>typical difference</span></div><div class="bands">{#each intelligence.bands as band}<div><span>{band.label}</span><strong>{band.count}</strong></div>{/each}</div><div class="breakdown-grid"><div><h3>By class</h3>{#each intelligence.by_class as item}<p><span>{item.label}<small>{item.sample_count} samples</small></span><strong>{item.median_error_percent > 0 ? "+" : ""}{item.median_error_percent}%</strong></p>{:else}<p class="muted">Need completed estimated tasks.</p>{/each}</div><div><h3>By task type</h3>{#each intelligence.by_task_type as item}<p><span>{item.label}<small>{item.sample_count} samples</small></span><strong>{item.median_error_percent > 0 ? "+" : ""}{item.median_error_percent}%</strong></p>{:else}<p class="muted">Need completed estimated tasks.</p>{/each}</div></div></section><section><h2>Planned versus actual</h2><div class="stats-row"><span><b>{formatMinutesShort(intelligence.blocks.planned_minutes)}</b>blocks planned</span><span><b>{formatMinutesShort(intelligence.blocks.completed_planned_minutes)}</b>blocks marked done</span><span><b>{formatDurationShort(intelligence.blocks.actual_tracked_seconds)}</b>tracked on block tasks</span></div><p class="muted">Actual time is shown at task level for tasks that had blocks in this range; it is not falsely assigned to an individual block.</p></section>{/if}
+  {#if review}<section class="review"><p class="eyebrow">{review.start_date} → {review.end_date}</p><h2>Weekly review</h2><div class="review-grid"><span><b>{review.completed_tasks}</b>completed</span><span><b>{review.overdue_tasks}</b>overdue</span><span><b>{formatDurationShort(review.median_session_seconds)}</b>median session</span><span><b>{review.schedule_coverage_percent}%</b>schedule coverage</span></div>{#if review.largest_estimate_miss}<p class="callout"><strong>Largest estimate miss:</strong> {review.largest_estimate_miss.course_code} · {review.largest_estimate_miss.task_title} was {review.largest_estimate_miss.difference_minutes > 0 ? `${review.largest_estimate_miss.difference_minutes}m over` : `${Math.abs(review.largest_estimate_miss.difference_minutes)}m under`} estimate.</p>{/if}<h3>Capacity and deadlines</h3><div class="workload">{#each review.workload as day}<div class:overloaded={day.overflow_minutes > 0}><span>{day.date.slice(5)}</span><span>{formatMinutesShort(day.scheduled_block_minutes)} blocks · {formatMinutesShort(day.remaining_due_minutes)} due work</span><strong>{day.load_percent === null ? "No capacity" : `${day.load_percent}%`}</strong></div>{/each}</div></section>{/if}
 </main>
 
 <style>
-.tabs { display: inline-flex; gap: 3px; padding: 3px; border: 1px solid var(--line); border-radius: 8px; margin: 10px 0 25px; }
-  .tabs button { border: 0; background: transparent; font-size: 12px; padding: 5px 12px; color: var(--muted); }
-  .tabs button.active { background: var(--accent-soft); color: var(--accent); }
-  .total { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 12px; margin: 0 0 30px; }
-  .total strong { color: var(--text); font-size: 34px; letter-spacing: -1.4px; font-weight: 600; }
-  .by-class { list-style: none; padding: 0; }
-  .by-class li { display: grid; grid-template-columns: 1fr auto; gap: 10px; padding: 18px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
-  .bar { grid-column: 1 / -1; height: 4px; background: var(--line); border-radius: 2px; overflow: hidden; }
-  .bar span { display: block; height: 100%; background: var(--accent); border-radius: 2px; }
-  .duration { font-variant-numeric: tabular-nums; color: var(--muted); }
+  .tabs{display:inline-flex;gap:3px;padding:3px;border:1px solid var(--line);border-radius:8px;margin:10px 0 25px}.tabs button{border:0;background:transparent;font-size:12px;padding:5px 12px;color:var(--muted)}.tabs button.active{background:var(--accent-soft);color:var(--accent)}section{margin:2.2rem 0;border-top:1px solid var(--line);padding-top:1rem}.hero-grid,.stats-row,.review-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.hero-card,.metric-card{padding:17px;border:1px solid var(--line);border-radius:10px;background:var(--surface)}.hero-card{background:var(--accent-soft)}.hero-card strong,.metric-card strong{display:block;font-size:27px;letter-spacing:-.04em;margin-top:8px}.hero-card small,.metric-card small,.stats-row span,.review-grid span{color:var(--muted);font-size:11px}.by-class{list-style:none;padding:0}.by-class li{display:grid;grid-template-columns:1fr auto;gap:10px;padding:15px 0;border-bottom:1px solid var(--line);font-size:13px}.bar{grid-column:1/-1;height:4px;background:var(--line);border-radius:2px;overflow:hidden}.bar span{display:block;height:100%;background:var(--accent)}.duration{color:var(--muted);font-variant-numeric:tabular-nums}.stats-row{grid-template-columns:repeat(3,1fr);margin:12px 0 18px}.stats-row span,.review-grid span{display:flex;flex-direction:column;gap:5px}.stats-row b,.review-grid b{color:var(--text);font-size:20px}.bands{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}.bands div{border-left:3px solid var(--accent);padding:8px 10px;background:var(--hover)}.bands span,.bands strong{display:block}.bands span{font-size:11px;color:var(--muted)}.bands strong{font-size:18px;margin-top:5px}.breakdown-grid{display:grid;grid-template-columns:1fr 1fr;gap:30px;margin-top:20px}.breakdown-grid p{display:flex;justify-content:space-between;border-bottom:1px solid var(--line);padding:8px 0;margin:0}.breakdown-grid small{display:block;color:var(--muted);font-size:10px}.breakdown-grid strong{color:var(--accent)}.muted{color:var(--muted);font-size:12px}.review{background:var(--surface);padding:18px;border:1px solid var(--line);border-radius:10px}.review-grid{grid-template-columns:repeat(4,1fr);margin:15px 0 20px}.callout{padding:11px 13px;background:var(--accent-soft);border-radius:7px;font-size:13px}.workload{display:grid;gap:4px}.workload div{display:grid;grid-template-columns:60px 1fr 50px;gap:10px;align-items:center;padding:8px 10px;background:var(--hover);font-size:12px}.workload strong{text-align:right}.workload .overloaded{color:var(--danger);background:color-mix(in srgb,var(--danger) 10%,var(--surface))}.error{color:var(--danger)}.empty{padding:1.5rem 1rem!important;text-align:center;color:var(--muted);border:1px dashed var(--line)}@media(max-width:680px){.hero-grid,.stats-row,.review-grid,.breakdown-grid{grid-template-columns:1fr 1fr}.bands{grid-template-columns:1fr 1fr}.workload div{grid-template-columns:45px 1fr 42px}}@media(max-width:430px){.hero-grid,.stats-row,.review-grid{grid-template-columns:1fr}.workload div{grid-template-columns:1fr}.workload strong{text-align:left}}
 </style>

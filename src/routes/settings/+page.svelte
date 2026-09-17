@@ -10,6 +10,7 @@
     listTodoistProjectMappings,
     mapTodoistProject,
     syncTodoistNow,
+    getTodoistOutboxStatus,
     listClasses,
     type TodoistStatus,
     type TodoistProjectMapping,
@@ -19,6 +20,7 @@
     setRecurringTemplateActive,
     updateRecurringTemplate,
     type RecurringTemplate,
+    type TodoistOutboxEntry,
   } from "$lib/api";
 
   let status = $state<TodoistStatus | null>(null);
@@ -35,6 +37,7 @@
   let recurringStart = $state(new Date().toISOString().slice(0, 10));
   let recurringEstimate = $state("");
   let editingRecurring = $state<number | null>(null);
+  let outbox = $state<TodoistOutboxEntry[]>([]);
 
   async function refresh() {
     try {
@@ -45,6 +48,7 @@
       if (status.connected) {
         mappings = await listTodoistProjectMappings();
       }
+      outbox = await getTodoistOutboxStatus();
       error = "";
     } catch (e) {
       error = String(e);
@@ -164,6 +168,7 @@
         <button class="secondary" onclick={disconnect}>Disconnect</button>
       </div>
       {#if syncMessage}<p class="muted">{syncMessage}</p>{/if}
+      {#if outbox.length}<h3>Completion delivery</h3><ul class="outbox">{#each outbox as entry (entry.id)}<li><span><strong>{entry.status === "completed" ? "Synced" : entry.status === "failed" ? "Failed" : entry.status === "sending" ? "Retrying" : "Queued"}</strong><small>{entry.updated_at} · {entry.attempts} attempt{entry.attempts === 1 ? "" : "s"}</small>{#if entry.last_error}<small class="outbox-error">{entry.last_error}</small>{/if}</span>{#if entry.status === "failed"}<button class="secondary" onclick={syncNow} disabled={busy}>Retry</button>{/if}</li>{/each}</ul>{/if}
 
       <h3>Project mappings</h3>
       <p class="muted">Todoist course tags are matched automatically to active classes by exact course code (for example, <code>LGST 1000</code>). Project mappings remain available as an override.</p>
@@ -212,6 +217,7 @@ section { margin-bottom: 2rem; border-top: 1px solid var(--line); padding-top: 1
   .mappings { list-style: none; padding: 0; }
   .mappings li { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); }
   .mappings .name { flex: 1; }
+  .outbox { list-style:none; padding:0; }.outbox li { display:flex; justify-content:space-between; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid var(--line); }.outbox small { display:block; color:var(--muted); font-size:10px; }.outbox-error { color:var(--danger)!important; max-width:500px; overflow:hidden; text-overflow:ellipsis; }
 .muted { color: var(--muted); font-size: 12px; }
   .recurring-form { display:grid; grid-template-columns:2fr 1fr 1fr 1fr 1fr auto; gap:8px; align-items:end; margin:14px 0; }
   .recurring-form label { display:grid; gap:4px; font-size:11px; color:var(--muted); }

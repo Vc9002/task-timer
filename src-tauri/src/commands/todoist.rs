@@ -19,6 +19,27 @@ pub struct TodoistProjectMapping {
     pub synced_at: Option<String>,
 }
 
+#[derive(Debug, Serialize)]
+pub struct TodoistOutboxEntry {
+    pub id: i64,
+    pub external_id: String,
+    pub status: String,
+    pub attempts: i64,
+    pub last_error: Option<String>,
+    pub updated_at: String,
+}
+
+#[tauri::command]
+pub fn get_todoist_outbox_status(db: State<Db>) -> Result<Vec<TodoistOutboxEntry>, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let result = conn.prepare("SELECT id,external_id,status,attempts,last_error,updated_at FROM integration_outbox ORDER BY id DESC LIMIT 25")
+        .map_err(|e| e.to_string())?
+        .query_map([], |row| Ok(TodoistOutboxEntry { id: row.get(0)?, external_id: row.get(1)?, status: row.get(2)?, attempts: row.get(3)?, last_error: row.get(4)?, updated_at: row.get(5)? }))
+        .map_err(|e| e.to_string())?
+        .collect::<Result<_, _>>().map_err(|e| e.to_string());
+    result
+}
+
 #[tauri::command]
 pub fn get_todoist_status(db: State<Db>) -> Result<TodoistStatus, String> {
     let connected = todoist::get_token()?.is_some();

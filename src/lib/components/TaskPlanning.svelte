@@ -16,6 +16,11 @@
   let milestoneDate = $state("");
   let error = $state("");
   let busy = $state(false);
+  function timeMinutes(value: string | null) { if (!value) return null; const [hours, mins] = value.split(":").map(Number); return hours * 60 + mins; }
+  function overlaps(dateValue: string, startValue: string | null, duration: number, excludeId?: number) {
+    const start = timeMinutes(startValue); if (start === null) return false;
+    return blocks.some(block => block.id !== excludeId && block.planned_date === dateValue && timeMinutes(block.planned_start_time) !== null && start < (timeMinutes(block.planned_start_time)! + block.planned_minutes) && (start + duration) > timeMinutes(block.planned_start_time)!);
+  }
 
   async function refresh() {
     try {
@@ -52,6 +57,7 @@
         <label><input type="date" value={block.planned_date} disabled={busy} onchange={(e) => void run(() => updateStudyBlock({ id: block.id, planned_date: e.currentTarget.value, planned_start_time: block.planned_start_time, planned_minutes: block.planned_minutes, completed: block.completed }))} /></label>
         <label><input type="time" value={block.planned_start_time ?? ""} disabled={busy} onchange={(e) => void run(() => updateStudyBlock({ id: block.id, planned_date: block.planned_date, planned_start_time: e.currentTarget.value || null, planned_minutes: block.planned_minutes, completed: block.completed }))} /></label>
         <label><input type="number" min="1" value={block.planned_minutes} disabled={busy} onchange={(e) => void run(() => updateStudyBlock({ id: block.id, planned_date: block.planned_date, planned_start_time: block.planned_start_time, planned_minutes: Number(e.currentTarget.value), completed: block.completed }))} />m</label>
+        <label class="done-label"><input type="checkbox" checked={block.completed} disabled={busy} onchange={(e) => void run(() => updateStudyBlock({ id: block.id, planned_date: block.planned_date, planned_start_time: block.planned_start_time, planned_minutes: block.planned_minutes, completed: e.currentTarget.checked }))} /> Mark block done</label>
         <button class="quiet" disabled={busy} onclick={() => void run(() => deleteStudyBlock(block.id))}>Delete</button>
       </div>
     {/each}
@@ -61,6 +67,7 @@
       <input aria-label="Study block minutes" required type="number" min="1" bind:value={minutes} />
       <button type="submit" disabled={busy}>Add block</button>
     </form>
+    {#if overlaps(date, startTime || null, minutes)}<p class="overlap-warning">⚠ This Study Block overlaps another planned block. You can still save it.</p>{/if}
   </section>
 
   <section>
@@ -97,6 +104,7 @@
   .milestone-title { flex: 1; min-width: 90px; }
   .add-row button, .quiet { min-height: 28px; padding: 3px 7px; font-size: 11px; }
   .done .milestone-title { text-decoration: line-through; color: var(--muted); }
+  .done-label { display:flex; align-items:center; gap:4px; color:var(--muted); font-size:10px; white-space:nowrap; }.overlap-warning { color:#a66a00; font-size:11px; margin:4px 0 0; }
   .error { margin: 0; }
   @media (max-width: 620px) { .row, .add-row, .milestone { flex-wrap: wrap; } }
 </style>

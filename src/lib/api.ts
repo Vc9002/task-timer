@@ -167,6 +167,18 @@ export function listTaskTemplates(): Promise<TaskTemplate[]> { return invoke("li
 export function createTaskTemplate(input: NewTaskTemplate): Promise<TaskTemplate> { return invoke("create_task_template", { input }); }
 export function deleteTaskTemplate(id: number): Promise<void> { return invoke("delete_task_template", { id }); }
 export function instantiateTaskTemplate(input: InstantiateTemplate): Promise<TaskRecord> { return invoke("instantiate_task_template", { input }); }
+export interface TemplateMilestone { id: number; template_id: number; title: string; offset_days_before_due: number | null; position: number; }
+export function listTemplateMilestones(templateId: number): Promise<TemplateMilestone[]> { return invoke("list_template_milestones", { templateId }); }
+export function createTemplateMilestone(input: { template_id: number; title: string; offset_days_before_due: number | null }): Promise<TemplateMilestone> { return invoke("create_template_milestone", { input }); }
+export function deleteTemplateMilestone(id: number): Promise<void> { return invoke("delete_template_milestone", { id }); }
+
+export interface Exam { id: number; class_id: number; course_code: string; title: string; exam_date: string; target_study_minutes: number | null; tracked_minutes: number; study_task_id: number | null; }
+export function listExams(): Promise<Exam[]> { return invoke("list_exams"); }
+export function createExam(input: { class_id: number; title: string; exam_date: string; target_study_minutes: number | null }): Promise<Exam> { return invoke("create_exam", { input }); }
+export function deleteExam(id: number): Promise<void> { return invoke("delete_exam", { id }); }
+export interface SemesterClassSummary { class_id: number; course_code: string; tracked_seconds: number; completed_tasks: number; open_tasks: number; upcoming_deadlines: number; }
+export interface SemesterDashboard { semester: string; tracked_seconds: number; completed_tasks: number; upcoming_deadlines: number; classes: SemesterClassSummary[]; }
+export function getSemesterDashboard(semester: string): Promise<SemesterDashboard> { return invoke("get_semester_dashboard", { semester }); }
 
 // ---------- Today ----------
 
@@ -376,6 +388,80 @@ export interface TaskHistory {
   sessions: SessionEntry[];
 }
 
+export interface EstimateBreakdown {
+  key: string;
+  label: string;
+  sample_count: number;
+  median_estimated_minutes: number;
+  median_actual_minutes: number;
+  median_error_percent: number;
+}
+export interface EstimateBand { label: string; count: number; }
+export interface SessionStats {
+  count: number;
+  median_seconds: number;
+  average_seconds: number;
+  longest_seconds: number;
+  under_ten_minutes: number;
+  at_least_thirty_minutes: number;
+}
+export interface BlockActualSummary {
+  planned_minutes: number;
+  completed_planned_minutes: number;
+  actual_tracked_seconds: number;
+  block_count: number;
+  completed_block_count: number;
+}
+export interface EstimateAnalytics {
+  sample_count: number;
+  median_estimated_minutes: number;
+  median_actual_minutes: number;
+  median_difference_minutes: number;
+  median_error_percent: number;
+  bands: EstimateBand[];
+  by_class: EstimateBreakdown[];
+  by_task_type: EstimateBreakdown[];
+  session_stats: SessionStats;
+  blocks: BlockActualSummary;
+}
+export interface EstimateSuggestion {
+  suggested_minutes: number | null;
+  sample_count: number;
+  source: string | null;
+  median_actual_minutes: number | null;
+}
+export interface EstimateMiss {
+  task_id: number;
+  task_title: string;
+  course_code: string;
+  estimated_minutes: number;
+  actual_minutes: number;
+  difference_minutes: number;
+  error_percent: number;
+}
+export interface WorkloadDay {
+  date: string;
+  available_minutes: number | null;
+  scheduled_block_minutes: number;
+  remaining_due_minutes: number;
+  remaining_capacity_minutes: number | null;
+  overflow_minutes: number;
+  load_percent: number | null;
+}
+export interface WeeklyReview {
+  start_date: string;
+  end_date: string;
+  tracked_seconds: number;
+  completed_tasks: number;
+  overdue_tasks: number;
+  largest_estimate_miss: EstimateMiss | null;
+  most_time_class: ClassTotal | null;
+  median_session_seconds: number;
+  schedule_coverage_percent: number;
+  blocks: BlockActualSummary;
+  workload: WorkloadDay[];
+}
+
 export function getAnalyticsToday(): Promise<RangeSummary> {
   return invoke("get_analytics_today");
 }
@@ -395,6 +481,22 @@ export function getDayView(date: string): Promise<DayView> {
 export function getTaskHistory(taskId: number): Promise<TaskHistory> {
   return invoke("get_task_history", { taskId });
 }
+
+export function getEstimateAnalytics(startDate: string, endDate: string): Promise<EstimateAnalytics> {
+  return invoke("get_estimate_analytics", { startDate, endDate });
+}
+export function getEstimateSuggestion(classId: number, taskType: TaskType): Promise<EstimateSuggestion> {
+  return invoke("get_estimate_suggestion", { classId, taskType });
+}
+export function getWeeklyReview(startDate: string): Promise<WeeklyReview> {
+  return invoke("get_weekly_review", { startDate });
+}
+
+export interface ProposedBlock { task_id: number; task_title: string; course_code: string; planned_date: string; planned_minutes: number; reason: string; }
+export interface PlanDay { date: string; capacity_minutes: number | null; existing_block_minutes: number; proposed_minutes: number; blocks: ProposedBlock[]; }
+export interface PlanProposal { start_date: string; end_date: string; days: PlanDay[]; unschedulable_overdue: string[]; }
+export function getPlanProposal(startDate: string, days: number): Promise<PlanProposal> { return invoke("get_plan_proposal", { input: { startDate, days } }); }
+export function applyPlan(blocks: Array<{ task_id: number; planned_date: string; planned_minutes: number }>): Promise<number> { return invoke("apply_plan", { input: { blocks } }); }
 
 // ---------- Todoist ----------
 
@@ -441,6 +543,8 @@ export function syncTodoistNow(): Promise<SyncResult> {
 export function completeTodoistTask(taskId: number): Promise<void> {
   return invoke("complete_todoist_task", { taskId });
 }
+export interface TodoistOutboxEntry { id: number; external_id: string; status: "pending" | "sending" | "completed" | "failed"; attempts: number; last_error: string | null; updated_at: string; }
+export function getTodoistOutboxStatus(): Promise<TodoistOutboxEntry[]> { return invoke("get_todoist_outbox_status"); }
 
 export function switchTimer(sessionId: number, taskId: number): Promise<ActiveSessionInfo> {
   return invoke("switch_timer", { sessionId, taskId });

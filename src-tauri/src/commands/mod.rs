@@ -1,5 +1,7 @@
 pub mod analytics;
 pub mod classes;
+pub mod exams;
+pub mod planner;
 pub mod planning;
 pub mod recurrence;
 pub mod tasks;

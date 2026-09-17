@@ -131,7 +131,7 @@ Finish, Open, and Quit. On macOS and Windows, closing the window hides it by
 default; Settings can change this to Quit. The tray's Quit always exits.
 Tray contents update only on timer transitions, with no elapsed-time polling.
 
-Global shortcuts default to Cmd/Ctrl+Shift+T (task picker),
+Global shortcuts default to Cmd/Ctrl+Shift+Y (task picker),
 Cmd/Ctrl+Shift+Space (pause/resume), and Cmd/Ctrl+Shift+F (finish).
 Change them in Settings, or leave a shortcut blank to disable it. Cmd/Ctrl+K
 opens the command palette for searching tasks/classes, jumping to views,
