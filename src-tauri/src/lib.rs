@@ -102,6 +102,7 @@ pub fn run() {
             idle::get_idle_threshold,
             idle::save_idle_threshold,
             export::export_data,
+            export::import_backup,
             desktop::desktop_status,
             desktop::save_desktop_settings,
             desktop::set_autostart,

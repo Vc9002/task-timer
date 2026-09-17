@@ -54,6 +54,138 @@ fn backup(conn: &rusqlite::Connection) -> Result<Vec<u8>, String> {
     }
     serde_json::to_vec_pretty(&result).map_err(|_| "Couldn't encode backup".into())
 }
+fn json_to_sql(value: &serde_json::Value) -> rusqlite::types::Value {
+    use rusqlite::types::Value as V;
+    match value {
+        serde_json::Value::Null => V::Null,
+        serde_json::Value::Bool(b) => V::Integer(*b as i64),
+        serde_json::Value::Number(n) => n
+            .as_i64()
+            .map(V::Integer)
+            .unwrap_or_else(|| V::Real(n.as_f64().unwrap_or(0.0))),
+        serde_json::Value::String(s) => V::Text(s.clone()),
+        _ => V::Null,
+    }
+}
+
+/// Replaces every row in `table` with the given backup rows, preserving each
+/// row's original id. Column list comes from each row's own JSON keys, so
+/// this tolerates schema drift between the backup's app version and this one
+/// as long as the columns still exist.
+fn restore_table(
+    conn: &rusqlite::Connection,
+    table: &str,
+    rows: &[serde_json::Value],
+) -> Result<(), String> {
+    conn.execute(&format!("DELETE FROM {table}"), [])
+        .map_err(|e| e.to_string())?;
+    for row in rows {
+        let Some(object) = row.as_object() else {
+            continue;
+        };
+        let columns: Vec<&String> = object.keys().collect();
+        let placeholders = vec!["?"; columns.len()].join(",");
+        let column_list = columns
+            .iter()
+            .map(|c| c.as_str())
+            .collect::<Vec<_>>()
+            .join(",");
+        let values: Vec<rusqlite::types::Value> =
+            columns.iter().map(|c| json_to_sql(&object[*c])).collect();
+        conn.execute(
+            &format!("INSERT INTO {table}({column_list}) VALUES({placeholders})"),
+            rusqlite::params_from_iter(values),
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Restores classes, tasks, time_sessions, and todoist_projects from a
+/// TaskTimer JSON backup, replacing current rows entirely. Foreign keys are
+/// held off during the swap (SQLite doesn't allow toggling them mid-transaction)
+/// so restoring the same ids the backup used re-links any planning data
+/// (Study Blocks, milestones, exams) that survives; anything left pointing at
+/// an id the backup doesn't have is pruned afterward rather than left dangling.
+fn restore_backup(conn: &mut rusqlite::Connection, bytes: &[u8]) -> Result<(), String> {
+    let backup: serde_json::Value =
+        serde_json::from_slice(bytes).map_err(|_| "That file isn't a TaskTimer backup.")?;
+    if backup["format_version"].as_i64() != Some(1) {
+        return Err("Unsupported backup format.".into());
+    }
+    let get = |key: &str| -> Vec<serde_json::Value> {
+        backup[key].as_array().cloned().unwrap_or_default()
+    };
+    conn.execute_batch("PRAGMA foreign_keys = OFF")
+        .map_err(|e| e.to_string())?;
+    let tx = conn.transaction().map_err(|e| e.to_string())?;
+    restore_table(&tx, "time_sessions", &get("time_sessions"))?;
+    restore_table(&tx, "tasks", &get("tasks"))?;
+    restore_table(&tx, "classes", &get("classes"))?;
+    restore_table(&tx, "todoist_projects", &get("todoist_projects"))?;
+    tx.execute(
+        "DELETE FROM study_blocks WHERE task_id NOT IN (SELECT id FROM tasks)",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+    tx.execute(
+        "DELETE FROM task_milestones WHERE task_id NOT IN (SELECT id FROM tasks)",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+    tx.execute(
+        "UPDATE exams SET study_task_id=NULL WHERE study_task_id IS NOT NULL AND study_task_id NOT IN (SELECT id FROM tasks)",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+    tx.execute(
+        "DELETE FROM exams WHERE class_id NOT IN (SELECT id FROM classes)",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+    tx.execute(
+        "DELETE FROM task_templates WHERE class_id NOT IN (SELECT id FROM classes)",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+    tx.execute(
+        "DELETE FROM recurring_task_templates WHERE class_id NOT IN (SELECT id FROM classes)",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+    tx.execute(
+        "DELETE FROM session_notifications WHERE session_id NOT IN (SELECT id FROM time_sessions)",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
+    tx.commit().map_err(|e| e.to_string())?;
+    conn.execute_batch("PRAGMA foreign_keys = ON")
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn import_backup(app: AppHandle) -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(file) = app
+            .dialog()
+            .file()
+            .add_filter("TaskTimer backup", &["json"])
+            .blocking_pick_file()
+        else {
+            return Ok(false);
+        };
+        let path = file.into_path().map_err(|_| "Choose a valid backup file")?;
+        let bytes = fs::read(&path).map_err(|_| "Couldn't read that file.".to_string())?;
+        let db = app.state::<Db>();
+        let mut conn = db.0.lock().map_err(|_| "Couldn't access the database")?;
+        restore_backup(&mut conn, &bytes)?;
+        Ok(true)
+    })
+    .await
+    .map_err(|_| "Couldn't complete restore")?
+}
+
 fn history_csv(conn: &rusqlite::Connection) -> Result<Vec<u8>, String> {
     let headers = "date,course_code,class_name,task_id,task_title,parent_task,start_time,end_time,duration_seconds,duration_minutes,edited,source";
     let mut csv = format!("{headers}\r\n");
@@ -219,6 +351,48 @@ mod tests {
     fn csv_escapes_special_characters_and_formulas() {
         assert_eq!(safe("a,\"b\"\nc".into()), "\"a,\"\"b\"\"\nc\"");
         assert_eq!(safe(" =1+2".into()), "\"' =1+2\"");
+    }
+
+    #[test]
+    fn restore_replaces_data_and_prunes_orphaned_planning_rows() {
+        let mut conn = crate::db::test_connection();
+        conn.execute_batch(
+            "INSERT INTO classes(id,course_code,semester) VALUES(1,'LGST','Fall');
+             INSERT INTO tasks(id,class_id,title) VALUES(1,1,'Old task');
+             INSERT INTO study_blocks(id,task_id,planned_date,planned_minutes) VALUES(1,1,'2026-09-01',30);
+             INSERT INTO time_sessions(id,task_id,start_ts,end_ts,final_duration_seconds) VALUES(1,1,'2026-09-01 10:00:00','2026-09-01 10:30:00',1800);",
+        )
+        .unwrap();
+        let backup = serde_json::json!({
+            "format_version": 1,
+            "classes": [{"id": 1, "course_code": "LGST", "name": null, "semester": "Fall", "color": null, "active": 1, "created_at": "2026-01-01", "updated_at": "2026-01-01"}],
+            "tasks": [{"id": 2, "class_id": 1, "parent_task_id": null, "title": "Restored task", "description": null, "status": "not_started", "priority": null, "due_at": null, "scheduled_date": null, "estimated_minutes": null, "source": "local", "external_id": null, "created_at": "2026-01-01", "updated_at": "2026-01-01", "completed_at": null, "todoist_project_id": null, "external_state": "active", "recurring_template_id": null, "occurrence_date": null, "task_type": "assignment", "tags": "[]", "time_budget_minutes": null, "is_class_timer": 0}],
+            "time_sessions": [],
+            "todoist_projects": [],
+        });
+        restore_backup(&mut conn, serde_json::to_vec(&backup).unwrap().as_slice()).unwrap();
+        let task_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM tasks", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(task_count, 1);
+        let title: String = conn
+            .query_row("SELECT title FROM tasks", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(title, "Restored task");
+        let orphaned_blocks: i64 = conn
+            .query_row("SELECT COUNT(*) FROM study_blocks", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            orphaned_blocks, 0,
+            "block tied to the removed task id 1 must be pruned"
+        );
+    }
+
+    #[test]
+    fn restore_rejects_unsupported_format() {
+        let mut conn = crate::db::test_connection();
+        let bad = serde_json::json!({"format_version": 2});
+        assert!(restore_backup(&mut conn, serde_json::to_vec(&bad).unwrap().as_slice()).is_err());
     }
 
     #[test]

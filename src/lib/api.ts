@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
 export function exportData(format: "csv" | "tasks" | "json" | "ics"): Promise<boolean> { return invoke("export_data", { format }); }
+export function importBackup(): Promise<boolean> { return invoke("import_backup"); }
 export interface NotificationPreferences { enabled: boolean; overrun_percent: number }
 export function notificationSettings(): Promise<NotificationPreferences> { return invoke("notification_settings"); }
 export function saveNotificationSettings(settings: NotificationPreferences): Promise<void> { return invoke("save_notification_settings", { settings }); }

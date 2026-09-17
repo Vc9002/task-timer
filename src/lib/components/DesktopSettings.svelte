@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
-  import { exportData, notificationSettings, saveNotificationSettings, testNotification } from "$lib/api";
+  import { exportData, importBackup, notificationSettings, saveNotificationSettings, testNotification } from "$lib/api";
   type Settings = { close_to_tray: boolean; start_hidden: boolean; shortcuts: string[] };
   let settings = $state<Settings | null>(null);
   let autostart = $state(false);
@@ -9,6 +9,7 @@
   let message = $state("");
   let warning = $state<string | null>(null);
   let notifications = $state({ enabled: false, overrun_percent: 25 });
+  let confirmingRestore = $state(false);
   async function load() {
     const status = await invoke<{ settings: Settings; autostart: boolean; shortcut_warning: string | null }>("desktop_status");
     settings = status.settings; autostart = status.autostart; warning = status.shortcut_warning; notifications = await notificationSettings();
@@ -17,6 +18,14 @@
   async function exportFile(format: "csv" | "tasks" | "json" | "ics") {
     busy = true; message = "";
     try { message = await exportData(format) ? "Export saved." : "Export cancelled."; }
+    catch (error) { message = String(error); }
+    finally { busy = false; }
+  }
+  async function restore() {
+    if (!confirmingRestore) { confirmingRestore = true; return; }
+    confirmingRestore = false;
+    busy = true; message = "";
+    try { message = await importBackup() ? "Backup restored. Restart TaskTimer to see the change everywhere." : "Restore cancelled."; }
     catch (error) { message = String(error); }
     finally { busy = false; }
   }
@@ -71,6 +80,10 @@
   <button disabled={busy} onclick={() => exportFile("json")}>Export all data JSON</button>
   <button disabled={busy} onclick={() => exportFile("ics")}>Export calendar (.ics)</button>
   <p>JSON preserves classes, task hierarchy, time history, and project mappings. Credentials and settings are excluded. The calendar export includes open task due dates and unfinished Study Blocks — subscribe to it in Calendar/Google Calendar/etc, or re-export after changes since it isn't a live feed.</p>
+  <h3>Restore</h3>
+  <button disabled={busy} onclick={restore} class:danger={confirmingRestore}>{confirmingRestore ? "Click again to confirm restore" : "Restore from JSON backup…"}</button>
+  {#if confirmingRestore}<button disabled={busy} onclick={() => confirmingRestore = false}>Cancel</button>{/if}
+  <p>Replaces all current classes, tasks, and time history with the backup's contents. Study Blocks, milestones, exams, and templates tied to tasks the backup doesn't have are removed rather than left dangling. This cannot be undone — export a fresh backup first if you're unsure.</p>
   {#if message}<p role="status">{message}</p>{/if}
 </section>
 <style>
@@ -82,5 +95,6 @@ section { margin-bottom: 2rem; }
   input:not([type=checkbox]), select { display: block; margin-top: 6px; width: 100%; max-width: 360px; }
   p { color: var(--muted); font-size: 11px; max-width: 44rem; line-height: 1.7; }
   button { margin: 3px 4px 3px 0; font-size: 12px; }
+  button.danger { color: var(--danger); border-color: var(--danger); }
   [role=status] { padding: 10px 12px; background: var(--accent-soft); color: var(--accent); border-radius: 6px; position: sticky; bottom: 10px; }
 </style>
