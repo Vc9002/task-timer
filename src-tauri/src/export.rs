@@ -158,6 +158,11 @@ fn restore_backup(conn: &mut rusqlite::Connection, bytes: &[u8]) -> Result<(), S
         [],
     )
     .map_err(|e| e.to_string())?;
+    tx.execute(
+        "DELETE FROM task_dependencies WHERE task_id NOT IN (SELECT id FROM tasks) OR depends_on_task_id NOT IN (SELECT id FROM tasks)",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
     tx.commit().map_err(|e| e.to_string())?;
     conn.execute_batch("PRAGMA foreign_keys = ON")
         .map_err(|e| e.to_string())?;
@@ -360,7 +365,9 @@ mod tests {
             "INSERT INTO classes(id,course_code,semester) VALUES(1,'LGST','Fall');
              INSERT INTO tasks(id,class_id,title) VALUES(1,1,'Old task');
              INSERT INTO study_blocks(id,task_id,planned_date,planned_minutes) VALUES(1,1,'2026-09-01',30);
-             INSERT INTO time_sessions(id,task_id,start_ts,end_ts,final_duration_seconds) VALUES(1,1,'2026-09-01 10:00:00','2026-09-01 10:30:00',1800);",
+             INSERT INTO time_sessions(id,task_id,start_ts,end_ts,final_duration_seconds) VALUES(1,1,'2026-09-01 10:00:00','2026-09-01 10:30:00',1800);
+             INSERT INTO tasks(id,class_id,title) VALUES(3,1,'Another old task');
+             INSERT INTO task_dependencies(task_id,depends_on_task_id) VALUES(3,1);",
         )
         .unwrap();
         let backup = serde_json::json!({
@@ -385,6 +392,13 @@ mod tests {
         assert_eq!(
             orphaned_blocks, 0,
             "block tied to the removed task id 1 must be pruned"
+        );
+        let orphaned_dependencies: i64 = conn
+            .query_row("SELECT COUNT(*) FROM task_dependencies", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            orphaned_dependencies, 0,
+            "dependency referencing removed task ids 1 and 3 must be pruned"
         );
     }
 
