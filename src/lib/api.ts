@@ -66,6 +66,7 @@ export interface TaskRecord {
   parent_task_id: number | null;
   title: string;
   description: string | null;
+  notes: string | null;
   status: "not_started" | "in_progress" | "completed";
   priority: number | null;
   due_at: string | null;
@@ -120,6 +121,7 @@ export interface UpdateTask {
   id: number;
   title: string;
   description: string | null;
+  notes: string | null;
   priority: number | null;
   due_at: string | null;
   scheduled_date: string | null;

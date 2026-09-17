@@ -48,6 +48,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         include_str!("migrations/0011_task_templates.sql"),
     ),
     ("0012_exams", include_str!("migrations/0012_exams.sql")),
+    (
+        "0013_task_notes",
+        include_str!("migrations/0013_task_notes.sql"),
+    ),
 ];
 
 pub fn open(app_data_dir: &Path) -> rusqlite::Result<Connection> {

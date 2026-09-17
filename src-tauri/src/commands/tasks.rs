@@ -9,6 +9,7 @@ pub struct Task {
     pub parent_task_id: Option<i64>,
     pub title: String,
     pub description: Option<String>,
+    pub notes: Option<String>,
     pub status: String,
     pub priority: Option<i64>,
     pub due_at: Option<String>,
@@ -56,6 +57,7 @@ pub struct UpdateTask {
     pub id: i64,
     pub title: String,
     pub description: Option<String>,
+    pub notes: Option<String>,
     pub priority: Option<i64>,
     pub due_at: Option<String>,
     pub scheduled_date: Option<String>,
@@ -108,6 +110,7 @@ pub(crate) fn row_to_task(row: &rusqlite::Row) -> rusqlite::Result<Task> {
         parent_task_id: row.get("parent_task_id")?,
         title: row.get("title")?,
         description: row.get("description")?,
+        notes: row.get("notes")?,
         status: row.get("status")?,
         priority: row.get("priority")?,
         due_at: row.get("due_at")?,
@@ -295,8 +298,8 @@ pub fn update_task(
          scheduled_date = ?5, estimated_minutes = ?6,
          task_type = CASE WHEN source='local' THEN ?7 ELSE task_type END,
          tags = CASE WHEN source='local' THEN ?8 ELSE tags END,
-         time_budget_minutes = ?9, updated_at = datetime('now')
-         WHERE id = ?10",
+         time_budget_minutes = ?9, notes = ?10, updated_at = datetime('now')
+         WHERE id = ?11",
         rusqlite::params![
             input.title,
             input.description,
@@ -308,6 +311,7 @@ pub fn update_task(
             serde_json::to_string(&normalize_tags(input.tags.as_deref().unwrap_or(&[])))
                 .map_err(|e| e.to_string())?,
             input.time_budget_minutes,
+            input.notes,
             input.id,
         ],
     )

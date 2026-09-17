@@ -23,6 +23,7 @@
   let editType = $state<TaskType>("assignment");
   let editTags = $state("");
   let editBudget = $state("");
+  let editNotes = $state("");
   let undoStatus = $state<TaskRecord["status"] | null>(null);
   let planningOpen = $state(false);
   let menu: HTMLDetailsElement;
@@ -36,7 +37,7 @@
   }
   async function saveEdit() {
     if (!editTitle.trim()) return;
-    if (await change(() => updateTask({ id: task.id, title: editTitle.trim(), description: task.description, priority: editPriority, due_at: editDue || null, scheduled_date: task.scheduled_date, estimated_minutes: editEstimate ? Number(editEstimate) : null, task_type: editType, tags: parseTags(editTags), time_budget_minutes: editBudget ? Number(editBudget) : null }))) editing = false;
+    if (await change(() => updateTask({ id: task.id, title: editTitle.trim(), description: task.description, notes: editNotes.trim() || null, priority: editPriority, due_at: editDue || null, scheduled_date: task.scheduled_date, estimated_minutes: editEstimate ? Number(editEstimate) : null, task_type: editType, tags: parseTags(editTags), time_budget_minutes: editBudget ? Number(editBudget) : null }))) editing = false;
   }
   async function complete() {
     if (task.source === "todoist") await change(() => completeTodoistTask(task.id));
@@ -65,6 +66,7 @@
       <small>{taskTypeLabel(task.task_type)}</small>
       {#each task.tags as tag}<small>#{tag}</small>{/each}
       {#if task.time_budget_minutes !== null}<small>{task.time_budget_minutes}m budget</small>{/if}
+      {#if task.notes}<small title={task.notes}>notes</small>{/if}
       </span>
     </span>
     <span class="meta" title="Estimated direct work">{task.estimated_minutes !== null ? `${task.estimated_minutes}m` : ""}<small>{task.estimated_minutes !== null ? "est." : ""}</small></span>
@@ -87,7 +89,7 @@
         {#if pickingDate}<input aria-label={`Schedule ${task.title}`} type="date" value={task.scheduled_date ?? ""} disabled={busy}
           onchange={(e) => change(() => scheduleTask(task.id, e.currentTarget.value || null))} />{/if}
         {#if task.scheduled_date}<button disabled={busy} onclick={() => change(() => scheduleTask(task.id, null))}>Clear schedule</button>{/if}
-        {#if task.source === "local"}<button onclick={() => { editing = !editing; menu.open = false; editTitle = task.title; editDue = task.due_at?.slice(0, 10) ?? ""; editEstimate = task.estimated_minutes?.toString() ?? ""; editPriority = task.priority ?? DEFAULT_PRIORITY; editType = task.task_type; editTags = task.tags.join(", "); editBudget = task.time_budget_minutes?.toString() ?? ""; }}>Edit task</button>{/if}
+        {#if task.source === "local"}<button onclick={() => { editing = !editing; menu.open = false; editTitle = task.title; editDue = task.due_at?.slice(0, 10) ?? ""; editEstimate = task.estimated_minutes?.toString() ?? ""; editPriority = task.priority ?? DEFAULT_PRIORITY; editType = task.task_type; editTags = task.tags.join(", "); editBudget = task.time_budget_minutes?.toString() ?? ""; editNotes = task.notes ?? ""; }}>Edit task</button>{/if}
         <button onclick={() => { planningOpen = !planningOpen; menu.open = false; }}>Plan blocks &amp; milestones</button>
         {#if task.source === "local"}<button disabled={busy} onclick={() => change(() => duplicateTask(task.id))}>Duplicate</button>{/if}
         {#if onhistory}<button onclick={() => onhistory?.(task.id)}>History</button>{/if}
@@ -103,6 +105,7 @@
       <label>Type<select bind:value={editType}>{#each TASK_TYPES as type}<option value={type.value}>{type.label}</option>{/each}</select></label>
       <label>Time budget (min)<input type="number" min="0" bind:value={editBudget} /></label>
       <label>Tags<input placeholder="reading, exam" bind:value={editTags} /></label>
+      <label class="notes-field">Notes<textarea rows="3" placeholder="Context, links, anything else" bind:value={editNotes}></textarea></label>
       <label>Priority
         <select bind:value={editPriority}>
           {#each Object.entries(PRIORITY_LABELS) as [value, label] (value)}
@@ -147,7 +150,8 @@ li { list-style: none; min-width: 0; }
   .context > .title { color: var(--muted); }
   .edit-form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 15px; background: var(--hover); border-radius: 8px; margin-block: 8px; }
   .edit-form label { display: grid; gap: 4px; font-size: 11px; color: var(--muted); }
-  .edit-form label:first-child, .edit-buttons { grid-column: 1 / -1; }
+  .edit-form label:first-child, .notes-field, .edit-buttons { grid-column: 1 / -1; }
+  .edit-form textarea { font: inherit; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; resize: vertical; }
   .edit-buttons { display: flex; gap: 8px; }
   @media(max-width: 550px) { .task-row { gap: 6px; } .meta { min-width: 28px; font-size: 10px; } ul { padding-left: 12px; } }
 </style>
