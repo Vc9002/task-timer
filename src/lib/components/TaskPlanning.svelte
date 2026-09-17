@@ -1,13 +1,17 @@
 <script lang="ts">
   import {
-    createStudyBlock, createTaskMilestone, deleteStudyBlock, deleteTaskMilestone,
-    listStudyBlocksForTask, listTaskMilestones, moveTaskMilestone, updateStudyBlock,
-    updateTaskMilestone, type StudyBlock, type TaskMilestone, type TaskRecord,
+    addTaskDependency, createStudyBlock, createTaskMilestone, deleteStudyBlock, deleteTaskMilestone,
+    listStudyBlocksForTask, listTaskDependencies, listTaskMilestones, listTasksForClass, moveTaskMilestone,
+    removeTaskDependency, updateStudyBlock, updateTaskMilestone,
+    type StudyBlock, type TaskDependency, type TaskMilestone, type TaskRecord,
   } from "$lib/api";
   import { formatMinutesShort } from "$lib/format";
   let { task, onchanged }: { task: TaskRecord; onchanged: () => Promise<void> } = $props();
   let blocks = $state<StudyBlock[]>([]);
   let milestones = $state<TaskMilestone[]>([]);
+  let dependencies = $state<TaskDependency[]>([]);
+  let candidates = $state<TaskRecord[]>([]);
+  let newDependencyId = $state<number | "">("");
   let title = $state("");
   let date = $state("");
   let startTime = $state("");
@@ -25,7 +29,10 @@
   async function refresh() {
     try {
       if (!date) date = task.due_at?.slice(0, 10) ?? "";
-      [blocks, milestones] = await Promise.all([listStudyBlocksForTask(task.id), listTaskMilestones(task.id)]);
+      [blocks, milestones, dependencies, candidates] = await Promise.all([
+        listStudyBlocksForTask(task.id), listTaskMilestones(task.id),
+        listTaskDependencies(task.id), listTasksForClass(task.class_id),
+      ]);
       error = "";
     } catch { error = "Couldn't load planning details."; }
   }
@@ -88,6 +95,28 @@
       <button type="submit" disabled={busy || !milestoneTitle.trim()}>Add</button>
     </form>
   </section>
+
+  <section>
+    <h4>Blocked by</h4>
+    {#each dependencies as dep (dep.id)}
+      <div class="row">
+        <span class="dep-title" class:done={dep.status === "completed"}>{dep.title}</span>
+        <small>{dep.status === "completed" ? "done" : dep.status.replace("_", " ")}</small>
+        <button class="quiet" disabled={busy} onclick={() => void run(() => removeTaskDependency(task.id, dep.id))}>×</button>
+      </div>
+    {:else}
+      <p class="muted">Not blocked by anything.</p>
+    {/each}
+    <form class="add-row" onsubmit={(e) => { e.preventDefault(); if (newDependencyId !== "") void run(async () => { await addTaskDependency(task.id, Number(newDependencyId)); newDependencyId = ""; }); }}>
+      <select aria-label="Task this depends on" bind:value={newDependencyId}>
+        <option value="">Choose a task…</option>
+        {#each candidates.filter(c => c.id !== task.id && !dependencies.some(d => d.id === c.id)) as candidate (candidate.id)}
+          <option value={candidate.id}>{candidate.title}</option>
+        {/each}
+      </select>
+      <button type="submit" disabled={busy || newDependencyId === ""}>Add</button>
+    </form>
+  </section>
   {#if error}<p class="error" role="alert">{error}</p>{/if}
 </div>
 
@@ -105,6 +134,9 @@
   .add-row button, .quiet { min-height: 28px; padding: 3px 7px; font-size: 11px; }
   .done .milestone-title { text-decoration: line-through; color: var(--muted); }
   .done-label { display:flex; align-items:center; gap:4px; color:var(--muted); font-size:10px; white-space:nowrap; }.overlap-warning { color:#a66a00; font-size:11px; margin:4px 0 0; }
+  .dep-title { flex: 1; }
+  .dep-title.done { text-decoration: line-through; color: var(--muted); }
+  .muted { color: var(--muted); font-size: 11px; margin: 4px 0; }
   .error { margin: 0; }
   @media (max-width: 620px) { .row, .add-row, .milestone { flex-wrap: wrap; } }
 </style>

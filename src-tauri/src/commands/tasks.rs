@@ -28,6 +28,7 @@ pub struct Task {
     pub scheduled_minutes_before_due: i64,
     pub unplanned_minutes: i64,
     pub schedule_coverage_percent: i64,
+    pub blocked_by_open_count: i64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -82,7 +83,10 @@ pub(crate) const TASK_SELECT: &str = "SELECT t.*, (
     CASE WHEN t.due_at IS NULL THEN 0 ELSE COALESCE((
         SELECT SUM(sb.planned_minutes) FROM study_blocks sb
         WHERE sb.task_id = t.id AND sb.planned_date <= substr(t.due_at, 1, 10)
-    ), 0) END AS scheduled_minutes_before_due
+    ), 0) END AS scheduled_minutes_before_due, (
+        SELECT COUNT(*) FROM task_dependencies td JOIN tasks dep ON dep.id = td.depends_on_task_id
+        WHERE td.task_id = t.id AND dep.status != 'completed'
+    ) AS blocked_by_open_count
     FROM tasks t";
 
 pub(crate) const ELIGIBLE_TASK_CLAUSE: &str = "t.class_id IN (SELECT id FROM classes WHERE active=1) AND
@@ -129,6 +133,7 @@ pub(crate) fn row_to_task(row: &rusqlite::Row) -> rusqlite::Result<Task> {
         scheduled_minutes_before_due,
         unplanned_minutes,
         schedule_coverage_percent,
+        blocked_by_open_count: row.get("blocked_by_open_count")?,
     })
 }
 

@@ -14,6 +14,7 @@ use commands::analytics::{
     get_estimate_analytics, get_estimate_suggestion, get_task_history, get_weekly_review,
 };
 use commands::classes::{archive_class, create_class, list_classes, update_class};
+use commands::dependencies::{add_task_dependency, list_task_dependencies, remove_task_dependency};
 use commands::exams::{create_exam, delete_exam, get_semester_dashboard, list_exams};
 use commands::planner::{apply_plan, get_plan_proposal};
 use commands::planning::{
@@ -140,6 +141,9 @@ pub fn run() {
             delete_template_milestone,
             get_plan_proposal,
             apply_plan,
+            list_task_dependencies,
+            add_task_dependency,
+            remove_task_dependency,
             get_pomodoro_settings,
             save_pomodoro_settings,
             notify_pomodoro_phase,

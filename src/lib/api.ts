@@ -90,6 +90,7 @@ export interface TaskRecord {
   scheduled_minutes_before_due: number;
   unplanned_minutes: number;
   schedule_coverage_percent: number;
+  blocked_by_open_count: number;
 }
 
 export type TaskType = "assignment" | "reading" | "problem_set" | "exam" | "project" | "other";
@@ -176,6 +177,11 @@ export function updateTaskMilestone(input: UpdateMilestone): Promise<TaskMilesto
 export function deleteTaskMilestone(id: number): Promise<void> { return invoke("delete_task_milestone", { id }); }
 export function moveTaskMilestone(id: number, direction: "up" | "down"): Promise<void> { return invoke("move_task_milestone", { id, direction }); }
 
+export interface TaskDependency { id: number; title: string; status: TaskRecord["status"]; }
+export function listTaskDependencies(taskId: number): Promise<TaskDependency[]> { return invoke("list_task_dependencies", { taskId }); }
+export function addTaskDependency(taskId: number, dependsOnTaskId: number): Promise<TaskDependency[]> { return invoke("add_task_dependency", { taskId, dependsOnTaskId }); }
+export function removeTaskDependency(taskId: number, dependsOnTaskId: number): Promise<TaskDependency[]> { return invoke("remove_task_dependency", { taskId, dependsOnTaskId }); }
+
 export interface TaskTemplate { id: number; name: string; class_id: number | null; task_type: TaskType | null; default_estimated_minutes: number | null; default_time_budget_minutes: number | null; priority: number | null; tags: string[]; }
 export interface NewTaskTemplate { name: string; class_id: number | null; task_type: TaskType | null; default_estimated_minutes: number | null; default_time_budget_minutes: number | null; priority: number | null; tags: string[]; }
 export interface InstantiateTemplate { template_id: number; class_id: number; title: string; due_at: string | null; scheduled_date: string | null; }
@@ -241,6 +247,7 @@ export interface WeekTask {
   scheduled_minutes_before_due: number;
   unplanned_minutes: number;
   schedule_coverage_percent: number;
+  blocked_by_open_count: number;
 }
 
 export interface WeekStudyBlock extends StudyBlock {}

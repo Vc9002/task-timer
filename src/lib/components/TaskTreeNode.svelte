@@ -67,6 +67,7 @@
       {#each task.tags as tag}<small>#{tag}</small>{/each}
       {#if task.time_budget_minutes !== null}<small>{task.time_budget_minutes}m budget</small>{/if}
       {#if task.notes}<small title={task.notes}>notes</small>{/if}
+      {#if task.blocked_by_open_count > 0}<small class="blocked" title="Blocked by {task.blocked_by_open_count} unfinished task(s)">blocked ×{task.blocked_by_open_count}</small>{/if}
       </span>
     </span>
     <span class="meta" title="Estimated direct work">{task.estimated_minutes !== null ? `${task.estimated_minutes}m` : ""}<small>{task.estimated_minutes !== null ? "est." : ""}</small></span>
@@ -137,6 +138,7 @@ li { list-style: none; min-width: 0; }
   .badges { display: flex; gap: 7px; flex-wrap: wrap; }
   small { font-size: 10px; color: var(--muted); font-weight: 400; }
   small.overdue { color: var(--danger); }
+  small.blocked { color: var(--danger); }
   .meta { min-width: 40px; text-align: right; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
   .meta small { display: block; font-size: 9px; }
   .start { padding: 0; min-height: 29px; width: 29px; color: var(--accent); border-color: transparent; background: var(--accent-soft); flex-shrink: 0; }

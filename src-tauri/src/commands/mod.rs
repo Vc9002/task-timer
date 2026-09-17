@@ -1,5 +1,6 @@
 pub mod analytics;
 pub mod classes;
+pub mod dependencies;
 pub mod exams;
 pub mod planner;
 pub mod planning;
