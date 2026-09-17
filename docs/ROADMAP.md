@@ -8,11 +8,11 @@ Native validation (2026-09-17): release binary built via `cargo build --release`
 
 Automated evidence currently passing:
 
-- `npm run check` — 200 files, 0 errors, 0 warnings
+- `npm run check` — 202 files, 0 errors, 0 warnings
 - `npm run build`
 - `cargo fmt --check`
 - `cargo clippy --all-targets --all-features -- -D warnings` — clean
-- `cargo test --lib` — 64 passed
+- `cargo test --lib` — 77 passed
 
 Code review (2026-09-16): no outstanding issues. SQL is parameterized throughout, error handling is consistent (`Result<_, String>` at the command boundary), no debug leftovers, no TODOs/FIXMEs. Full findings below under "Code review notes."
 
@@ -97,30 +97,27 @@ All items below were verified against the real production database via the nativ
 
 This pass is operationally released as v0.3.3.
 
+## Feature backlog — complete (2026-09-17)
+
+All nine backlog items from the 2026-09-16 review are implemented, tested, and committed:
+
+1. **Idle detection.** Polls macOS `HIDIdleTime` every 30s, auto-pauses the active timer past a configurable threshold (default 5 min, 0 disables it).
+2. **Pomodoro long break.** Every 4th work cycle takes a configurable long break instead of the short one.
+3. **Tray countdown for Pomodoro.** Frontend clock pushes phase/remaining time to the tray menu every 15s and on phase change.
+4. **Task notes.** Free-text `notes` column (migration 0013), editable from the task edit form.
+5. **.ics calendar export.** Open task due dates and unfinished Study Blocks as RFC 5545 VEVENTs, alongside CSV/JSON export.
+6. **In-app backup/restore.** Restores classes/tasks/time_sessions/todoist_projects from a JSON backup, pruning any planning data left pointing at an id the backup doesn't have. Two-click confirm since it's destructive.
+7. **Weekly review nudge.** Configurable day/hour local notification pointing at the existing Analytics weekly review, tracked by ISO week so it fires at most once.
+8. **Task dependencies ("blocked by").** New `task_dependencies` table (migration 0014) with a recursive-CTE cycle check; a `blocked_by_open_count` field rides along on every task query via the shared `TASK_SELECT` projection.
+9. **Tags filter.** Tags already existed as a class-independent field on tasks; added a client-side filter to Inbox rather than rebuilding what was already there.
+
+All verified via `cargo test --lib` (77 passing), `cargo clippy -D warnings`, `cargo fmt --check`, and `npm run check` (202 files, 0 errors) after each addition. Native macOS walkthrough of these specific features has not yet happened — see Next steps.
+
 ## Next steps (in order)
 
-Small, bounded — no new subsystems:
-
-1. **Idle detection.** Auto-pause the timer after N minutes of no keyboard/mouse activity, so stepping away doesn't silently track time.
-2. **Classic Pomodoro long break.** Every 4th work cycle triggers a longer break (15–20 min) instead of the short one.
-3. **Tray countdown for Pomodoro.** Mirror the sidebar widget's remaining time in the menu-bar tray label alongside the existing timer status.
-4. **Task notes.** Free-text notes field per task for context beyond the title — one column, one textarea, no new subsystem.
-
-Medium — touches existing flows, still bounded:
-
-5. **.ics calendar export.** Export Study Blocks/due dates to a calendar file, alongside the existing CSV/JSON export.
-6. **In-app backup/restore.** `export_data` already exists; add a restore-from-backup command so a bad state is recoverable without manual sqlite file surgery.
-7. **Weekly review nudge.** Scheduled local notification pointing at the existing Analytics weekly review, so it doesn't rely on remembering to check.
-
-Larger — needs its own brainstorm/design pass, real schema changes:
-
-8. **Task dependencies** ("blocked by" / "blocks") — useful for multi-step assignments.
-9. **Tags/labels independent of class** — cross-class groupings (e.g. "reading," "problem set").
-
-Blocked on a config decision from you, no implementation possible yet:
-
-10. **Canvas read-only integration.** Needs Canvas base URL and authentication method. No credentials or institution endpoint should be hardcoded. Canvas should own assignment name, course, and due date; TaskTimer retains study scheduling, estimates, subtasks, and time history. Canvas must never overwrite local planning fields.
-11. **Search upgrades** — only if measured scale makes indexed search necessary. Not needed yet.
+1. **Native macOS validation of the 2026-09-17 feature batch.** The items above are automated-checks-clean but haven't been walked through in the real `.app` the way the 2026-09-16 planning/exam/Pomodoro pass was. Particularly: idle auto-pause (needs real inactivity, can't be simulated), tray countdown rendering, and a real backup/restore round-trip against a copy of the production database.
+2. **Canvas read-only integration.** Needs Canvas base URL and authentication method. No credentials or institution endpoint should be hardcoded. Canvas should own assignment name, course, and due date; TaskTimer retains study scheduling, estimates, subtasks, and time history. Canvas must never overwrite local planning fields.
+3. **Search upgrades** — only if measured scale makes indexed search necessary. Not needed yet.
 
 ## Explicitly out of scope
 
