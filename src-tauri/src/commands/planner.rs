@@ -94,14 +94,16 @@ fn course_codes(conn: &Connection) -> rusqlite::Result<HashMap<i64, String>> {
         .collect()
 }
 
-#[tauri::command]
-pub fn get_plan_proposal(db: State<Db>, input: PlanRequest) -> Result<PlanProposal, String> {
-    let start = NaiveDate::parse_from_str(&input.start_date, "%Y-%m-%d")
+pub(crate) fn plan_proposal_for(
+    conn: &Connection,
+    start_date: &str,
+    days: i64,
+) -> Result<PlanProposal, String> {
+    let start = NaiveDate::parse_from_str(start_date, "%Y-%m-%d")
         .map_err(|_| "Choose a valid planning start date.".to_string())?;
-    let days = input.days.clamp(1, 7);
+    let days = days.clamp(1, 7);
     let end = start + Duration::days(days - 1);
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
-    let class_codes = course_codes(&conn).map_err(|e| e.to_string())?;
+    let class_codes = course_codes(conn).map_err(|e| e.to_string())?;
     let mut tasks: Vec<Task> = conn
         .prepare(&format!(
             "{TASK_SELECT} WHERE {ELIGIBLE_TASK_CLAUSE} AND t.status!='completed' ORDER BY t.id"
@@ -111,7 +113,9 @@ pub fn get_plan_proposal(db: State<Db>, input: PlanRequest) -> Result<PlanPropos
         .map_err(|e| e.to_string())?
         .collect::<Result<_, _>>()
         .map_err(|e| e.to_string())?;
-    tasks.retain(|task| task.remaining_minutes.unwrap_or(0) >= 25);
+    tasks.retain(|task| {
+        task.remaining_minutes.unwrap_or(0) >= 25 && task.blocked_by_open_count == 0
+    });
     tasks.sort_by_key(|task| {
         let due = task_due(task);
         (
@@ -132,8 +136,8 @@ pub fn get_plan_proposal(db: State<Db>, input: PlanRequest) -> Result<PlanPropos
     let mut date = start;
     while date <= end {
         let date_string = date.to_string();
-        let capacity = capacity_for(&conn, &date_string).map_err(|e| e.to_string())?;
-        let existing = existing_minutes(&conn, &date_string).map_err(|e| e.to_string())?;
+        let capacity = capacity_for(conn, &date_string).map_err(|e| e.to_string())?;
+        let existing = existing_minutes(conn, &date_string).map_err(|e| e.to_string())?;
         let mut available = capacity.map(|value| (value - existing).max(0)).unwrap_or(0);
         let mut blocks = Vec::new();
         for task in &tasks {
@@ -195,6 +199,12 @@ pub fn get_plan_proposal(db: State<Db>, input: PlanRequest) -> Result<PlanPropos
 }
 
 #[tauri::command]
+pub fn get_plan_proposal(db: State<Db>, input: PlanRequest) -> Result<PlanProposal, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    plan_proposal_for(&conn, &input.start_date, input.days)
+}
+
+#[tauri::command]
 pub fn apply_plan(db: State<Db>, input: ApplyPlanInput) -> Result<usize, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
@@ -222,4 +232,74 @@ pub fn apply_plan(db: State<Db>, input: ApplyPlanInput) -> Result<usize, String>
     }
     tx.commit().map_err(|e| e.to_string())?;
     Ok(input.blocks.len())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn db() -> Connection {
+        let c = crate::db::test_connection();
+        c.execute_batch(
+            "INSERT INTO classes(id,course_code,semester) VALUES(1,'LGST','Fall');
+             INSERT INTO app_settings(key,value) VALUES
+                ('study_capacity_1','120'),('study_capacity_2','120'),
+                ('study_capacity_3','120'),('study_capacity_4','120'),
+                ('study_capacity_5','120'),('study_capacity_6','120'),
+                ('study_capacity_7','120');",
+        )
+        .unwrap();
+        c
+    }
+
+    fn add(c: &Connection, id: i64, due: Option<&str>, estimate: i64) {
+        c.execute(
+            "INSERT INTO tasks(id,class_id,title,due_at,estimated_minutes) VALUES(?1,1,'Task',?2,?3)",
+            params![id, due, estimate],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn blocked_task_is_excluded_from_the_proposal() {
+        let c = db();
+        add(&c, 1, Some("2026-09-20"), 60);
+        add(&c, 2, Some("2026-09-20"), 60);
+        c.execute(
+            "INSERT INTO task_dependencies(task_id,depends_on_task_id) VALUES(2,1)",
+            [],
+        )
+        .unwrap();
+        let plan = plan_proposal_for(&c, "2026-09-17", 3).unwrap();
+        let scheduled_ids: Vec<i64> = plan
+            .days
+            .iter()
+            .flat_map(|d| d.blocks.iter())
+            .map(|b| b.task_id)
+            .collect();
+        assert!(scheduled_ids.contains(&1));
+        assert!(!scheduled_ids.contains(&2));
+    }
+
+    #[test]
+    fn task_becomes_schedulable_once_its_blocker_completes() {
+        let c = db();
+        add(&c, 1, Some("2026-09-20"), 60);
+        add(&c, 2, Some("2026-09-20"), 60);
+        c.execute(
+            "INSERT INTO task_dependencies(task_id,depends_on_task_id) VALUES(2,1)",
+            [],
+        )
+        .unwrap();
+        c.execute("UPDATE tasks SET status='completed' WHERE id=1", [])
+            .unwrap();
+        let plan = plan_proposal_for(&c, "2026-09-17", 3).unwrap();
+        let scheduled_ids: Vec<i64> = plan
+            .days
+            .iter()
+            .flat_map(|d| d.blocks.iter())
+            .map(|b| b.task_id)
+            .collect();
+        assert!(scheduled_ids.contains(&2));
+    }
 }
