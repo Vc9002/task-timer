@@ -49,6 +49,38 @@ fn next_up_rank(t: &TodayTask, date: &str) -> (i32, i32, String, i32, i64) {
     )
 }
 
+/// Computes overdue status for a set of due-date/timestamp strings in one round-trip,
+/// instead of one query per task. Preserves exact SQLite date-function semantics
+/// (date-only strings are floating local dates; timestamps are converted via 'localtime').
+pub(crate) fn overdue_map_for<'a>(
+    conn: &Connection,
+    due_values: impl Iterator<Item = &'a str>,
+    date: &str,
+) -> rusqlite::Result<HashMap<String, bool>> {
+    let distinct: Vec<&str> = due_values.collect::<HashSet<_>>().into_iter().collect();
+    if distinct.is_empty() {
+        return Ok(HashMap::new());
+    }
+    // SQLite doesn't support naming columns on a derived-table alias, so refer to
+    // the VALUES clause's default `column1`.
+    let placeholders = distinct.iter().map(|_| "(?)").collect::<Vec<_>>().join(",");
+    let sql = format!(
+        "SELECT column1, CASE WHEN length(column1)=10 THEN date(column1) ELSE date(column1,'localtime') END < ? \
+         FROM (VALUES {placeholders})"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    // The `? FROM (VALUES (?),(?),...)` text places the date placeholder first,
+    // so it must be bound first too — params are matched to `?` by textual order.
+    let mut params: Vec<&dyn rusqlite::ToSql> = vec![&date];
+    params.extend(distinct.iter().map(|v| v as &dyn rusqlite::ToSql));
+    let result = stmt
+        .query_map(params.as_slice(), |r| {
+            Ok((r.get::<_, String>(0)?, r.get(1)?))
+        })?
+        .collect();
+    result
+}
+
 pub(crate) fn today_for(
     conn: &Connection,
     date: &str,
@@ -94,6 +126,19 @@ pub(crate) fn today_for(
             parent = task.parent_task_id;
         }
     }
+    // Prefetch class codes and overdue status once instead of per task (avoids N+1 round-trips).
+    let class_codes: HashMap<i64, String> = conn
+        .prepare("SELECT id, course_code FROM classes")?
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<Result<_, _>>()?;
+    let overdue_map = overdue_map_for(
+        conn,
+        tasks
+            .iter()
+            .filter(|t| included.contains(&t.id))
+            .filter_map(|t| t.due_at.as_deref()),
+        date,
+    )?;
     let mut groups: BTreeMap<i64, TodayClassGroup> = BTreeMap::new();
     let mut estimate = 0;
     for task in tasks {
@@ -104,15 +149,13 @@ pub(crate) fn today_for(
         if !context_only {
             estimate += task.estimated_minutes.unwrap_or(0);
         }
-        let overdue = match &task.due_at {
-            Some(due) => conn.query_row("SELECT CASE WHEN length(?1)=10 THEN date(?1) ELSE date(?1,'localtime') END < ?2",params![due,date],|r|r.get::<_,Option<bool>>(0))?.unwrap_or(false),
-            None => false,
-        };
-        let code: String = conn.query_row(
-            "SELECT course_code FROM classes WHERE id=?1",
-            [task.class_id],
-            |r| r.get(0),
-        )?;
+        let overdue = task
+            .due_at
+            .as_deref()
+            .and_then(|due| overdue_map.get(due))
+            .copied()
+            .unwrap_or(false);
+        let code = class_codes.get(&task.class_id).cloned().unwrap_or_default();
         groups
             .entry(task.class_id)
             .or_insert_with(|| TodayClassGroup {

@@ -52,22 +52,18 @@ pub struct WeekSummary {
 fn to_week_task(
     conn: &Connection,
     task: Task,
-    today: &str,
+    _today: &str,
     context_only: bool,
+    class_codes: &std::collections::HashMap<i64, String>,
+    overdue_map: &std::collections::HashMap<String, bool>,
 ) -> rusqlite::Result<WeekTask> {
-    let course_code: String = conn.query_row(
-        "SELECT course_code FROM classes WHERE id=?1",
-        [task.class_id],
-        |r| r.get(0),
-    )?;
-    let overdue = match &task.due_at {
-        Some(due) => conn.query_row(
-            "SELECT CASE WHEN length(?1)=10 THEN date(?1) ELSE date(?1,'localtime') END < ?2",
-            rusqlite::params![due, today],
-            |r| r.get::<_, bool>(0),
-        )?,
-        None => false,
-    };
+    let course_code = class_codes.get(&task.class_id).cloned().unwrap_or_default();
+    let overdue = task
+        .due_at
+        .as_deref()
+        .and_then(|due| overdue_map.get(due))
+        .copied()
+        .unwrap_or(false);
     let not_completed = task.status != "completed";
     let mut path = Vec::new();
     let mut parent = task.parent_task_id;
@@ -165,6 +161,17 @@ pub(crate) fn week_for(conn: &Connection, start_date: &str) -> rusqlite::Result<
             }
         }
     }
+    // Prefetch class codes and overdue status once instead of per task (avoids N+1 round-trips).
+    let class_codes: std::collections::HashMap<i64, String> = conn
+        .prepare("SELECT id, course_code FROM classes")?
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<Result<_, _>>()?;
+    let overdue_map = crate::commands::today::overdue_map_for(
+        conn,
+        tasks.iter().filter_map(|t| t.due_at.as_deref()),
+        &today,
+    )?;
+
     let mut days = Vec::new();
     let mut week_estimate_remaining = 0i64;
     let mut week_tracked = 0i64;
@@ -175,7 +182,7 @@ pub(crate) fn week_for(conn: &Connection, start_date: &str) -> rusqlite::Result<
             continue;
         }
         let context_only = selected.contains(&task.id) && task.scheduled_date.as_deref().is_none();
-        let week_task = to_week_task(conn, task, &today, context_only)?;
+        let week_task = to_week_task(conn, task, &today, context_only, &class_codes, &overdue_map)?;
         match &week_task.scheduled_date {
             Some(date)
                 if date.as_str() >= start.to_string().as_str()

@@ -113,15 +113,27 @@ All nine backlog items from the 2026-09-16 review are implemented, tested, and c
 
 All verified via `cargo test --lib` (77 passing), `cargo clippy -D warnings`, `cargo fmt --check`, and `npm run check` (202 files, 0 errors) after each addition. Native macOS walkthrough of these specific features has not yet happened — see Next steps.
 
+## Product direction
+
+Local-first academic planning and time intelligence for macOS, with optional Todoist interoperability. TaskTimer stays focused on four things: capture work, plan work, track actual time, and improve future planning from your own history. Canvas and AI are non-goals — see "Explicitly out of scope."
+
 ## Next steps (in order)
 
 1. **Native macOS validation of the 2026-09-17 feature batch.** The items above are automated-checks-clean but haven't been walked through in the real `.app` the way the 2026-09-16 planning/exam/Pomodoro pass was. Particularly: idle auto-pause (needs real inactivity, can't be simulated), tray countdown rendering, and a real backup/restore round-trip against a copy of the production database.
-2. **Canvas read-only integration.** Needs Canvas base URL and authentication method. No credentials or institution endpoint should be hardcoded. Canvas should own assignment name, course, and due date; TaskTimer retains study scheduling, estimates, subtasks, and time history. Canvas must never overwrite local planning fields.
-3. **Search upgrades** — only if measured scale makes indexed search necessary. Not needed yet.
+2. **Performance hardening.** Activity Monitor audit of the running app, reduce background wakeups, inspect SQLite query plans, eliminate N+1 queries.
+   - Background wakeup audit (2026-09-17): idle-detection poll is 30s, weekly-review poll is 15min — both sparse and reasonable. The two frontend 1s `setInterval` ticks (task timer, Pomodoro) only run while a session is actively counting, and are torn down otherwise — no idle wakeup cost.
+   - N+1 fix (2026-09-17): the Today view and Week view each issued 2 SQL round-trips per task (a per-task `course_code` lookup and a per-task overdue date-compare query). Both now prefetch a class-code map once and batch the overdue computation into a single query per view via a `VALUES`-table join, preserving exact SQLite date-comparison semantics (date-only strings are floating local dates; timestamps go through `'localtime'`). Verified with `cargo test --lib` (77 passing), `cargo clippy -D warnings`, `cargo fmt --check`, `npm run check`.
+   - Remaining: `week.rs`'s per-ancestor parent-path walk (one query per level climbing `parent_task_id`) is still per-row but bounded by hierarchy depth, which is typically shallow — left as-is pending evidence it matters. SQLite query-plan (`EXPLAIN QUERY PLAN`) inspection of the larger aggregate queries (analytics, semester dashboard) not yet done.
+3. **Planning quality.** Improve Plan My Day/Week heuristics, dependency-aware scheduling, better handling of partially completed Study Blocks, overdue work, exams, and capacity.
+4. **Analytics quality.** Estimate calibration, weekly review, semester trends, planned-vs-actual, deadline coverage, class workload.
+5. **Operational reliability.** Backup/restore verification, migration testing, export validation, crash recovery, sleep/wake behavior.
+6. **UX polish.** Keyboard navigation, clearer empty/error states, consistent task/block/completion language, better dense Mac layouts.
+7. **Todoist as the only external integration**, with explicit ownership and retry/status UI (already partially implemented — see Pass D above; continue hardening).
+8. **Search upgrades** — only if measured scale makes indexed search necessary. Not needed yet.
 
 ## Explicitly out of scope
 
-Canvas write access, full two-way Todoist field sync, cloud sync, mobile, Pomodoro streaks/gamification/scoring, giant analytics libraries, local LLMs, AI proposals/duration predictions (decided against — estimates and planning stay fully manual).
+**Canvas integration (read or write), in any form** — removed as a non-goal. TaskTimer is not becoming a general LMS/integration platform. Full two-way Todoist field sync, cloud sync, mobile, Pomodoro streaks/gamification/scoring, giant analytics libraries, local LLMs, and any AI features (proposals, duration predictions, heuristic generation) — decided against; estimates and planning stay fully manual and locally computed.
 
 ## Operating rules
 
