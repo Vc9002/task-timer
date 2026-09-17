@@ -99,10 +99,28 @@ This pass is operationally released as v0.3.3.
 
 ## Next steps (in order)
 
-1. **Canvas read-only integration.** Blocked until Canvas base URL, authentication method, and ownership mapping are explicitly configured. No credentials or institution endpoint should be hardcoded. Canvas should own assignment name, course, and due date; TaskTimer retains study scheduling, estimates, subtasks, and time history. Canvas must never overwrite local planning fields.
-2. **Search upgrades** — only if measured scale makes indexed search necessary. Not needed yet.
+Small, bounded — no new subsystems:
 
-Canvas needs a config decision from you before any implementation can start — there's nothing to build until then.
+1. **Idle detection.** Auto-pause the timer after N minutes of no keyboard/mouse activity, so stepping away doesn't silently track time.
+2. **Classic Pomodoro long break.** Every 4th work cycle triggers a longer break (15–20 min) instead of the short one.
+3. **Tray countdown for Pomodoro.** Mirror the sidebar widget's remaining time in the menu-bar tray label alongside the existing timer status.
+4. **Task notes.** Free-text notes field per task for context beyond the title — one column, one textarea, no new subsystem.
+
+Medium — touches existing flows, still bounded:
+
+5. **.ics calendar export.** Export Study Blocks/due dates to a calendar file, alongside the existing CSV/JSON export.
+6. **In-app backup/restore.** `export_data` already exists; add a restore-from-backup command so a bad state is recoverable without manual sqlite file surgery.
+7. **Weekly review nudge.** Scheduled local notification pointing at the existing Analytics weekly review, so it doesn't rely on remembering to check.
+
+Larger — needs its own brainstorm/design pass, real schema changes:
+
+8. **Task dependencies** ("blocked by" / "blocks") — useful for multi-step assignments.
+9. **Tags/labels independent of class** — cross-class groupings (e.g. "reading," "problem set").
+
+Blocked on a config decision from you, no implementation possible yet:
+
+10. **Canvas read-only integration.** Needs Canvas base URL and authentication method. No credentials or institution endpoint should be hardcoded. Canvas should own assignment name, course, and due date; TaskTimer retains study scheduling, estimates, subtasks, and time history. Canvas must never overwrite local planning fields.
+11. **Search upgrades** — only if measured scale makes indexed search necessary. Not needed yet.
 
 ## Explicitly out of scope
 
