@@ -100,14 +100,13 @@ This pass is operationally released as v0.3.3.
 ## Next steps (in order)
 
 1. **Canvas read-only integration.** Blocked until Canvas base URL, authentication method, and ownership mapping are explicitly configured. No credentials or institution endpoint should be hardcoded. Canvas should own assignment name, course, and due date; TaskTimer retains study scheduling, estimates, subtasks, and time history. Canvas must never overwrite local planning fields.
-2. **Optional AI proposals (duration predictions, suggestions).** Blocked until an AI provider/model credential boundary is explicitly chosen. Deterministic planning must remain fully usable without it, and any automatic planning must never silently create or reschedule work — proposals always require explicit user approval.
-3. **Search upgrades** — only if measured scale makes indexed search necessary. Not needed yet.
+2. **Search upgrades** — only if measured scale makes indexed search necessary. Not needed yet.
 
-Both Canvas and AI proposals need a config decision from you before any implementation can start — there's nothing to build until then.
+Canvas needs a config decision from you before any implementation can start — there's nothing to build until then.
 
 ## Explicitly out of scope
 
-Canvas write access, full two-way Todoist field sync, cloud sync, mobile, Pomodoro streaks/gamification/scoring, giant analytics libraries, local LLMs, AI as a required core dependency.
+Canvas write access, full two-way Todoist field sync, cloud sync, mobile, Pomodoro streaks/gamification/scoring, giant analytics libraries, local LLMs, AI proposals/duration predictions (decided against — estimates and planning stay fully manual).
 
 ## Operating rules
 
