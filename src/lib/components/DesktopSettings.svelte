@@ -14,7 +14,7 @@
     settings = status.settings; autostart = status.autostart; warning = status.shortcut_warning; notifications = await notificationSettings();
   }
   async function saveNotifications() { busy = true; message = ""; try { await saveNotificationSettings(notifications); message = "Notification settings saved."; } catch (error) { message = String(error); } finally { busy = false; } }
-  async function exportFile(format: "csv" | "tasks" | "json") {
+  async function exportFile(format: "csv" | "tasks" | "json" | "ics") {
     busy = true; message = "";
     try { message = await exportData(format) ? "Export saved." : "Export cancelled."; }
     catch (error) { message = String(error); }
@@ -69,7 +69,8 @@
   <button disabled={busy} onclick={() => exportFile("tasks")}>Export tasks CSV</button>
   <button disabled={busy} onclick={() => exportFile("csv")}>Export history CSV</button>
   <button disabled={busy} onclick={() => exportFile("json")}>Export all data JSON</button>
-  <p>JSON preserves classes, task hierarchy, time history, and project mappings. Credentials and settings are excluded. Restore/import is not available yet.</p>
+  <button disabled={busy} onclick={() => exportFile("ics")}>Export calendar (.ics)</button>
+  <p>JSON preserves classes, task hierarchy, time history, and project mappings. Credentials and settings are excluded. The calendar export includes open task due dates and unfinished Study Blocks — subscribe to it in Calendar/Google Calendar/etc, or re-export after changes since it isn't a live feed.</p>
   {#if message}<p role="status">{message}</p>{/if}
 </section>
 <style>

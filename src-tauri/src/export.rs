@@ -72,21 +72,100 @@ fn history_csv(conn: &rusqlite::Connection) -> Result<Vec<u8>, String> {
     }
     Ok(csv.into_bytes())
 }
+/// Escapes text per RFC 5545 section 3.3.11 (comma, semicolon, backslash, newline).
+fn ics_escape(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace(',', "\\,")
+        .replace(';', "\\;")
+        .replace('\n', "\\n")
+}
+
+fn ics_date(value: &str) -> String {
+    value.replace('-', "")
+}
+
+fn calendar_ics(conn: &rusqlite::Connection) -> Result<Vec<u8>, String> {
+    let mut ics = String::from(
+        "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//TaskTimer//EN\r\nCALSCALE:GREGORIAN\r\n",
+    );
+    let due_rows = records(
+        conn,
+        "SELECT t.id,t.title,c.course_code,t.due_at FROM tasks t JOIN classes c ON c.id=t.class_id
+         WHERE t.due_at IS NOT NULL AND t.status!='completed' AND c.active=1",
+    )
+    .map_err(|_| "Couldn't read due dates")?;
+    for row in due_rows {
+        let Some(due_at) = row["due_at"].as_str() else {
+            continue;
+        };
+        let date = &due_at[..10.min(due_at.len())];
+        let course = row["course_code"].as_str().unwrap_or("");
+        let title = row["title"].as_str().unwrap_or("");
+        ics.push_str(&format!(
+            "BEGIN:VEVENT\r\nUID:tasktimer-due-{}@tasktimer\r\nDTSTART;VALUE=DATE:{}\r\nSUMMARY:{}\r\nEND:VEVENT\r\n",
+            row["id"],
+            ics_date(date),
+            ics_escape(&format!("{course} — {title}"))
+        ));
+    }
+    let block_rows = records(
+        conn,
+        "SELECT sb.id,sb.planned_date,sb.planned_start_time,sb.planned_minutes,t.title,c.course_code
+         FROM study_blocks sb JOIN tasks t ON t.id=sb.task_id JOIN classes c ON c.id=t.class_id
+         WHERE sb.completed=0",
+    )
+    .map_err(|_| "Couldn't read study blocks")?;
+    for row in block_rows {
+        let date = row["planned_date"].as_str().unwrap_or("");
+        let course = row["course_code"].as_str().unwrap_or("");
+        let title = row["title"].as_str().unwrap_or("");
+        let minutes = row["planned_minutes"].as_i64().unwrap_or(0);
+        let summary = ics_escape(&format!("Study: {course} — {title}"));
+        if let Some(start_time) = row["planned_start_time"].as_str() {
+            let start = format!("{}T{}00", ics_date(date), start_time.replace(':', ""));
+            let end_minutes = minutes;
+            let (h, m) = start_time
+                .split_once(':')
+                .and_then(|(h, m)| Some((h.parse::<i64>().ok()?, m.parse::<i64>().ok()?)))
+                .unwrap_or((0, 0));
+            let total = h * 60 + m + end_minutes;
+            let end = format!(
+                "{}T{:02}{:02}00",
+                ics_date(date),
+                (total / 60) % 24,
+                total % 60
+            );
+            ics.push_str(&format!(
+                "BEGIN:VEVENT\r\nUID:tasktimer-block-{}@tasktimer\r\nDTSTART:{}\r\nDTEND:{}\r\nSUMMARY:{}\r\nEND:VEVENT\r\n",
+                row["id"], start, end, summary
+            ));
+        } else {
+            ics.push_str(&format!(
+                "BEGIN:VEVENT\r\nUID:tasktimer-block-{}@tasktimer\r\nDTSTART;VALUE=DATE:{}\r\nSUMMARY:{}\r\nEND:VEVENT\r\n",
+                row["id"], ics_date(date), summary
+            ));
+        }
+    }
+    ics.push_str("END:VCALENDAR\r\n");
+    Ok(ics.into_bytes())
+}
+
 #[tauri::command]
 pub async fn export_data(app: AppHandle, format: String) -> Result<bool, String> {
-    if !["csv", "tasks", "json"].contains(&format.as_str()) {
-        return Err("Choose CSV or JSON export.".into());
+    if !["csv", "tasks", "json", "ics"].contains(&format.as_str()) {
+        return Err("Choose CSV, JSON, or calendar export.".into());
     }
     tauri::async_runtime::spawn_blocking(move || {
-    let extension = if format == "json" { "json" } else { "csv" };
+    let extension = match format.as_str() { "json" => "json", "ics" => "ics", _ => "csv" };
     let Some(file) = app
         .dialog()
         .file()
         .add_filter("TaskTimer export", &[extension])
-        .set_file_name(if format != "json" {
-            "tasktimer-export.csv"
-        } else {
-            "tasktimer-export.json"
+        .set_file_name(match format.as_str() {
+            "json" => "tasktimer-export.json",
+            "ics" => "tasktimer-calendar.ics",
+            _ => "tasktimer-export.csv",
         })
         .blocking_save_file() else { return Ok(false); };
     let path = file
@@ -100,6 +179,8 @@ pub async fn export_data(app: AppHandle, format: String) -> Result<bool, String>
         let conn = db.0.lock().map_err(|_| "Couldn't read local data")?;
         if format == "json" {
             backup(&conn)?
+        } else if format == "ics" {
+            calendar_ics(&conn)?
         } else if format == "tasks" {
             let mut csv = String::from("class,task,parent,status,due_date,scheduled_date,estimated_minutes,tracked_minutes,source\r\n");
             for row in records(&conn,"SELECT c.course_code AS class,t.title AS task,p.title AS parent,t.status,t.due_at AS due_date,t.scheduled_date,t.estimated_minutes,(SELECT COALESCE(SUM(final_duration_seconds),0)/60.0 FROM time_sessions WHERE task_id=t.id AND end_ts IS NOT NULL) AS tracked_minutes,t.source FROM tasks t JOIN classes c ON c.id=t.class_id LEFT JOIN tasks p ON p.id=t.parent_task_id ORDER BY t.id").map_err(|_| "Couldn't read tasks")? {
@@ -138,5 +219,25 @@ mod tests {
     fn csv_escapes_special_characters_and_formulas() {
         assert_eq!(safe("a,\"b\"\nc".into()), "\"a,\"\"b\"\"\nc\"");
         assert_eq!(safe(" =1+2".into()), "\"' =1+2\"");
+    }
+
+    #[test]
+    fn ics_includes_due_dates_and_timed_study_blocks() {
+        let conn = crate::db::test_connection();
+        conn.execute_batch(
+            "INSERT INTO classes(id,course_code,semester) VALUES(1,'LGST','Fall');
+             INSERT INTO tasks(id,class_id,title,due_at) VALUES(1,1,'Read Ch.3','2026-09-20T23:59:00');
+             INSERT INTO study_blocks(id,task_id,planned_date,planned_start_time,planned_minutes) VALUES(1,1,'2026-09-18','14:30',90);
+             INSERT INTO study_blocks(id,task_id,planned_date,planned_minutes) VALUES(2,1,'2026-09-19',60);",
+        )
+        .unwrap();
+        let ics = String::from_utf8(calendar_ics(&conn).unwrap()).unwrap();
+        assert!(ics.starts_with("BEGIN:VCALENDAR"));
+        assert!(ics.trim_end().ends_with("END:VCALENDAR"));
+        assert!(ics.contains("DTSTART;VALUE=DATE:20260920"));
+        assert!(ics.contains("LGST"));
+        assert!(ics.contains("DTSTART:20260918T143000"));
+        assert!(ics.contains("DTEND:20260918T160000"));
+        assert!(ics.contains("DTSTART;VALUE=DATE:20260919"));
     }
 }
