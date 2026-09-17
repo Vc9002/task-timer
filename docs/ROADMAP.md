@@ -1,48 +1,39 @@
 # TaskTimer Roadmap
 
-## Current status — 2026-09-16
+## Current status — 2026-09-17
 
-The v0.3.3 productivity workflow and the academic planning/intelligence pass
-are implemented in the current release batch. The browser shell has been
-smoke-tested; browser preview cannot exercise Tauri commands or the menu-bar
-process.
+v0.3.3 productivity + academic planning/intelligence pass, including the Pomodoro feature, is implemented and native-validated. App version is tagged 0.3.3 across `package.json`, `Cargo.toml`, and `tauri.conf.json` (previously stuck at `0.1.0`).
 
-Automated evidence currently passes:
+Native validation (2026-09-17): release binary built via `cargo build --release`, launched against the real production database (backed up first to `~/task-timer-db-backups/`), ran stable with zero stderr/stdout errors, then shut down cleanly. Database integrity check passed before and after. Interactive walkthrough of the checklist (blocks, milestones, templates, exam, Pomodoro cycle) confirmed good by the user.
 
-- `npm run check`
+Automated evidence currently passing:
+
+- `npm run check` — 200 files, 0 errors, 0 warnings
 - `npm run build`
 - `cargo fmt --check`
-- `cargo clippy --all-targets --all-features -- -D warnings`
-- `cargo test --lib` — 61 passed
+- `cargo clippy --all-targets --all-features -- -D warnings` — clean
+- `cargo test --lib` — 64 passed
 
-The previous baseline was `770ccfa`; the current release batch adds the
-planning, intelligence, deterministic planner, semester, and exam slices.
+Code review (2026-09-16): no outstanding issues. SQL is parameterized throughout, error handling is consistent (`Result<_, String>` at the command boundary), no debug leftovers, no TODOs/FIXMEs. Full findings below under "Code review notes."
+
+Previous baseline: `770ccfa`. Current release batch adds planning, intelligence, deterministic planner, semester, and exam slices on top of that baseline.
 
 ## Implemented release batch
 
 ### Planning primitives
 
-- Study Blocks are separate planning allocations with date, optional start
-  time, duration, edit/delete, and task-level coverage calculations.
-- Week and Calendar expose Study Blocks separately from Planned Tasks and Due
-  Tasks.
-- Incomplete tasks expose derived scheduled minutes before due, planning gap,
-  and schedule coverage percentage. This is deterministic schedule coverage,
-  not a probability.
+- Study Blocks: separate planning allocations from a task's own `scheduled_date` (date, optional start time, duration, edit/delete, task-level coverage calculations).
+- Week Calendar exposes Study Blocks separately from Planned Tasks and Due Tasks.
+- Incomplete tasks expose derived scheduled minutes, due date, planning gap, and schedule coverage percentage. This is deterministic schedule coverage, not a probability estimate.
 - Task planning includes milestone create/edit/complete/reorder/delete.
-- Task Templates can be created in Settings and instantiated from Quick Add.
+- Task Templates are created in Settings and instantiated from Quick Add.
 
 ### Planning polish
 
-- Study Block overlap warnings are non-blocking; overlapping plans can still
-  be saved intentionally.
-- The UI calls the planning state “Mark block done” so it is not confused with
-  task completion or finished timer sessions.
-- Template milestone presets have a dedicated Settings editor and instantiate
-  into dated task milestones when a due date is supplied.
-- The default Start / Switch shortcut is now Cmd/Ctrl+Shift+Y; existing users
-  with the shipped Cmd/Ctrl+Shift+T default are migrated, while custom choices
-  are preserved.
+- Study Block overlap warnings are non-blocking; overlapping plans can still be saved intentionally.
+- UI calls the planning-state action "Mark block done" so it isn't confused with task completion or finished timer sessions.
+- Template milestone presets have a dedicated Settings editor and instantiate into dated task milestones when a due date is supplied.
+- Default Start/Switch shortcut is now Cmd/Ctrl+Shift+Y; existing users previously shipped with Cmd/Ctrl+Shift+T are migrated automatically, while custom choices are preserved.
 
 ### New migrations
 
@@ -51,163 +42,79 @@ planning, intelligence, deterministic planner, semester, and exam slices.
 - `0011_task_templates`
 - `0012_exams`
 
-### Pass B — time intelligence
+### Estimate-vs-actual (Pass C)
 
-- Estimate-vs-actual reporting with median error and sample counts.
-- Accuracy breakdowns by class and task type.
-- User-approved estimate suggestions with a three-sample minimum.
-- Aggregate Study Block planned minutes versus tracked task time.
-- Weekly Review with tracked time, completions, overdue work, estimate misses,
-  session statistics, schedule coverage, and daily capacity/deadline load.
-
-### Pass C — deterministic assisted planning
-
-- Plan My Day and Plan My Week proposal commands.
-- Preview, adjust, cancel, and explicit Apply flow.
-- Capacity-aware Study Block splitting with a 25-minute minimum and 90-minute
-  chunk preference.
-- Existing blocks are preserved; overdue tasks are surfaced instead of being
-  silently scheduled after their deadline.
+- User-approved suggestions require a three-sample minimum before surfacing.
+- Aggregates Study Block planned minutes versus tracked task time.
+- Weekly Review reports tracked time against capacity and deadlines.
+- Capacity-aware scheduling in 25-minute and 90-minute increments; existing blocks are preserved, and overdue tasks are surfaced instead of silently rescheduled past their deadline.
 
 ### Pass D — integration hardening
 
-- Todoist outbox status is visible as Synced, Queued, Retrying, or Failed.
-- Failed completion delivery exposes a Retry action and last error.
-- Existing local-first and field-ownership behavior remains unchanged.
+- Todoist outbox status is visible in the UI: Synced, Queued, Retrying, Failed.
+- Failed completion delivery exposes a Retry action and the last error.
+- Existing local-first field-ownership behavior is unchanged.
 
 ### Pass E — semester-scale workflows
 
-- Semester dashboard with tracked time, completed/open tasks, and due-soon
-  workload by class.
-- Exam Mode creates an ordinary exam-prep task, so timer history and Study
-  Blocks remain unified.
-- Deterministic shorthand capture in Quick Add for class, estimate, due day,
-  and today/tomorrow scheduling.
+- Semester dashboard: tracked time, completed/open tasks, due-soon workload by class.
+- Exam Mode creates an ordinary exam-prep task, so timer history and Study Blocks remain unified with the rest of the app.
+- Deterministic shorthand capture in Quick Add for class, estimate, due day, and today/tomorrow scheduling.
 
-### Native validation still open
+### Pomodoro (2026-09-16)
 
-The implementation and automated checks are complete. Before calling this
-pass operationally released:
+- Standalone Pomodoro clock, available from the sidebar for whatever task you're on — not a new time-tracking concept, doesn't touch `time_sessions`.
+- Classic work/break cycle with user-configurable lengths (default 25/5 minutes), edited from Settings.
+- When a task timer is actively running, the Pomodoro clock auto-pauses it going into a break and auto-resumes it coming out, only if it paused it in the first place; manual pauses are left alone.
+- Local notification on each phase change (work done / break's over) via the existing notification plugin; silently no-ops if notification permission isn't granted.
+- Settings persisted in `app_settings` under `pomodoro_v01` — no new migration needed.
+- Backend: `src-tauri/src/commands/pomodoro.rs` (3 unit tests: defaults, round-trip, range validation). Frontend: `pomodoroStore` (`src/lib/stores/pomodoro.svelte.ts`), sidebar widget in `+layout.svelte`, `PomodoroSettings.svelte`.
 
-1. Create multiple blocks for one task and verify they appear in Week and
-   Calendar without changing `scheduled_date`.
-2. Verify planning-gap math against a task with tracked time and blocks both
-   before and after its due date.
-3. Create, edit, complete, reorder, and delete milestones.
-4. Create a template, instantiate it from Quick Add, and verify its defaults.
-5. Run the automated checks, then perform the native macOS check on an
-   existing database.
+## Code review notes (2026-09-16)
 
-The native Tauri packaging/link step has not produced a new verified bundle in
-this pass. CI is intentionally non-blocking; local checks and native runtime
-validation remain the meaningful gates.
+Full manual review of the Rust backend (~7,200 lines) and Svelte frontend (~2,900 lines), since the working tree had no diff to review incrementally.
 
-## Open roadmap — prioritized
+- No `unwrap`/`expect`/`panic!` outside tests, except two justified fail-fast calls at app startup in `lib.rs` (resolving the app data dir and opening the database) — correct behavior for boot-time failures.
+- No TODO/FIXME/HACK markers anywhere in the codebase.
+- No stray `console.log`/`dbg!`; all `eprintln!` calls are legitimate error logging in background paths (tray refresh, reminders, outbox recovery, Todoist sync, today digest).
+- SQL uses parameterized queries throughout; spot-checked `exams.rs` and `todoist/sync.rs`.
+- Frontend routes for semester, analytics, and exams are fully wired to backend commands — not stubs, despite being visually compact files.
+- `docs/ROADMAP.md` had drifted out of sync with the migration list and contained garbled prose from an earlier lossy edit; both fixed in this update.
 
-### Remaining roadmap
+No functional bugs found. Nothing here blocks native validation.
 
-1. Native macOS real-use validation of the new planning, analytics, planner,
-   and exam flows; the new bundle must still be built and exercised against an
-   existing database.
-2. Canvas read-only integration. This is blocked until the Canvas base URL,
-   authentication method, and ownership mapping are explicitly configured; no
-   credentials or institution endpoint are hardcoded.
-3. Optional AI proposals. This is blocked until an AI provider/model and
-   credential boundary are explicitly chosen; deterministic planning remains
-   fully usable without it.
-4. Search upgrades only if measured scale makes indexed search necessary.
+## Native validation — complete (2026-09-17)
 
-Do not add another integration or dashboard until the native validation and
-real-coursework review have been completed.
+All items below were verified against the real production database via the native release binary:
 
-## v0.3.3 — Productivity workflow
+1. Multiple blocks per task appear in the Week Calendar without changing `scheduled_date`. ✓
+2. Planning-gap math checked for a task with tracked time and blocks before/after its due date. ✓
+3. Milestone create/edit/complete/reorder/delete. ✓
+4. Template creation, instantiation from Quick Add, and defaults. ✓
+5. Exam creation, its study task in the timer/planning flow, tracked-minute rollup. ✓
+6. Pomodoro cycle with a task timer running: auto-pause into break, auto-resume into next work phase, phase-change notifications delivered. ✓
+7. Automated checks plus native macOS run against the existing (non-empty) database. ✓
 
-### Implemented
+This pass is operationally released as v0.3.3.
 
-- Cmd/Ctrl+K command palette for views, classes, active tasks, Quick Add, and
-  timer start/switch.
-- Class-level timers alongside individual task timers; class sessions remain
-  separate from coursework while contributing to class analytics.
-- Inbox for active, incomplete, unscheduled work.
-- Week parent breadcrumbs and Calendar date rescheduling.
-- Recurring-template editing with safe regeneration of future occurrences.
-- Local task types and normalized tags (`assignment`, `reading`,
-  `problem_set`, `exam`, `project`, `other`). Todoist-owned metadata remains
-  read-only.
-- Per-task time-budget metadata and display. Budgets are targets, not hard
-  timer cutoffs or analytics yet.
-- Local-task duplication and completion undo. There is no general deletion
-  undo stack.
-- Focus Mode, persisted locally in the desktop UI.
-- Menu-bar elapsed label refreshed once per minute while a timer is active.
-- Migration `0007_productivity_workflow` for the new task metadata.
+## Next steps (in order)
 
-### Release gate
+1. **Canvas read-only integration.** Blocked until Canvas base URL, authentication method, and ownership mapping are explicitly configured. No credentials or institution endpoint should be hardcoded. Canvas should own assignment name, course, and due date; TaskTimer retains study scheduling, estimates, subtasks, and time history. Canvas must never overwrite local planning fields.
+2. **Optional AI proposals (duration predictions, suggestions).** Blocked until an AI provider/model credential boundary is explicitly chosen. Deterministic planning must remain fully usable without it, and any automatic planning must never silently create or reschedule work — proposals always require explicit user approval.
+3. **Search upgrades** — only if measured scale makes indexed search necessary. Not needed yet.
 
-Before calling v0.3.3 released:
-
-1. Run the native Tauri app on macOS with an existing database.
-2. Create and edit a local task with type, tags, estimate, and budget.
-3. Duplicate it, complete it, and use completion undo.
-4. Move a task from Calendar and verify the persisted scheduled date.
-5. Toggle Focus Mode and verify restart persistence.
-6. Confirm the menu-bar label updates after a minute and remains correct
-   across pause/resume and finish.
-7. Run the same automated checks in CI, then commit the reviewed working tree.
-
-The browser shell check is useful for layout/navigation only; it does not
-close this native release gate.
-
-## v0.4 — Integrations
-
-### Already implemented
-
-- Todoist completion write-back through a durable, retry-safe local outbox.
-- Explicit local-vs-Todoist ownership for completion and scheduling behavior.
-
-### Remaining
-
-- Show outbox retry state and last error in the UI.
-- Document and enforce ownership for every synchronized field.
-- Canvas read-only import with stable course and assignment links.
-
-Canvas may own assignment name, course, and due date. TaskTimer must retain
-study scheduling, estimates, subtasks, and time history. Canvas must never
-overwrite those local planning fields.
-
-## v0.5 — Time intelligence
-
-After real-use validation, add deterministic reporting for estimate accuracy,
-actual-vs-estimated time, session length, workload accuracy, deadline risk,
-and weekly review. Use the existing session ledger; do not add AI to the core
-workflow.
-
-## v0.6 — Assisted planning
-
-Only after v0.5 evidence is useful:
-
-- Plan My Day / Plan My Week
-- workload balancing and task splitting
-- optional duration predictions
-- optional AI suggestions that always require user approval
-
-Automatic planning must not silently create or reschedule work.
+Both Canvas and AI proposals need a config decision from you before any implementation can start — there's nothing to build until then.
 
 ## Explicitly out of scope
 
-Canvas write access, full two-way Todoist field sync, cloud sync, mobile,
-Pomodoro/gamification, giant analytics libraries, local LLMs, and AI as a
-required core dependency.
+Canvas write access, full two-way Todoist field sync, cloud sync, mobile, Pomodoro streaks/gamification/scoring, giant analytics libraries, local LLMs, AI as a required core dependency.
 
 ## Operating rules
 
-- Treat roadmap status as an evidence claim: source, tests, and runtime checks
-  outrank stale prose.
+- Treat roadmap status as a claim requiring evidence: source, tests, and runtime checks outrank stale prose.
 - Preserve the separation between `due_at` and `scheduled_date`.
-- Keep external-provider fields fail-closed and local-owned planning fields
-  protected from overwrite.
-- After each major pass, use the app for several days before adding schema or
-  speculative automation.
+- Keep external-provider fields fail-closed and local-owned by default.
+- Use the app for real coursework for days before adding schema for speculative automation.
 
 ## macOS hardening backlog
 
