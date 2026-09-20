@@ -108,6 +108,9 @@ fn check(app: &AppHandle) -> Result<(), String> {
     if now.weekday().num_days_from_sunday() != prefs.weekday || now.hour() != prefs.hour {
         return Ok(());
     }
+    if crate::focus_mode::is_active(app) {
+        return Ok(());
+    }
     let iso = now.iso_week();
     let week_key = format!("{}-W{:02}", iso.year(), iso.week());
     if already_notified_this_week(&conn, &week_key) {

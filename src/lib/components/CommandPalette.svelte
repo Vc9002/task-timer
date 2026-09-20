@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
   import Modal from "./Modal.svelte";
-  import { listClasses, listTasksForClass, type ClassRecord, type TaskRecord } from "$lib/api";
+  import { listClasses, listTasksForClass, getToday, type ClassRecord, type TaskRecord } from "$lib/api";
   import { timerStore } from "$lib/stores/timer.svelte";
 
   let { onclose, onquickadd, onstart }: {
@@ -34,9 +34,22 @@
   let error = $state("");
   let resultsElement: HTMLDivElement;
 
+  async function startTopSuggestion() {
+    try {
+      const today = await getToday(true);
+      const top = today.next_up[0];
+      if (!top) { error = "Nothing to suggest — no open tasks."; return; }
+      await timerStore.start(top.id, top.title);
+      if (!timerStore.conflict && !timerStore.error) closeAfterAction();
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
   let actions: Result[] = $derived([
     { kind: "action", label: "Add a task", detail: "Create a local task", run: onquickadd },
     { kind: "action", label: timerStore.active ? "Switch task" : "Start a task", detail: "Begin tracking time", run: onstart },
+    { kind: "action", label: "What should I work on?", detail: "Start the top suggested task", run: () => void startTopSuggestion() },
   ]);
   let classResults: Result[] = $derived(classes.map(c => ({
     kind: "navigation" as const,

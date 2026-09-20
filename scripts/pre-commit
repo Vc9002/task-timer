@@ -1,0 +1,5 @@
+#!/bin/sh
+set -e
+echo "Running pre-commit checks..."
+npm run check
+(cd src-tauri && cargo fmt --check && cargo clippy --all-targets --all-features -- -D warnings)

@@ -35,7 +35,7 @@ fn records(conn: &rusqlite::Connection, sql: &str) -> rusqlite::Result<Vec<serde
     rows.collect()
 }
 
-fn backup(conn: &rusqlite::Connection) -> Result<Vec<u8>, String> {
+pub(crate) fn backup(conn: &rusqlite::Connection) -> Result<Vec<u8>, String> {
     let tx = conn
         .unchecked_transaction()
         .map_err(|_| "Couldn't read local data")?;

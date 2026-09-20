@@ -14,6 +14,12 @@ export interface WeeklyReviewSettings { enabled: boolean; weekday: number; hour:
 export function getWeeklyReviewSettings(): Promise<WeeklyReviewSettings> { return invoke("get_weekly_review_settings"); }
 export function saveWeeklyReviewSettings(settings: WeeklyReviewSettings): Promise<void> { return invoke("save_weekly_review_settings", { settings }); }
 
+export interface CloudBackupSettings { enabled: boolean; folder: string | null }
+export function getCloudBackupSettings(): Promise<CloudBackupSettings> { return invoke("get_cloud_backup_settings"); }
+export function saveCloudBackupSettings(settings: CloudBackupSettings): Promise<void> { return invoke("save_cloud_backup_settings", { settings }); }
+export function pickCloudBackupFolder(): Promise<string | null> { return invoke("pick_cloud_backup_folder"); }
+export function runCloudBackupNow(): Promise<string> { return invoke("run_cloud_backup_now"); }
+
 export interface PomodoroSettings { work_minutes: number; break_minutes: number; long_break_minutes: number }
 export function getPomodoroSettings(): Promise<PomodoroSettings> { return invoke("get_pomodoro_settings"); }
 export function savePomodoroSettings(settings: PomodoroSettings): Promise<void> { return invoke("save_pomodoro_settings", { settings }); }
@@ -513,6 +519,20 @@ export function getEstimateSuggestion(classId: number, taskType: TaskType): Prom
 }
 export function getWeeklyReview(startDate: string): Promise<WeeklyReview> {
   return invoke("get_weekly_review", { startDate });
+}
+
+export interface ClassStreak {
+  class_id: number;
+  course_code: string;
+  current_streak_days: number;
+}
+export interface Streaks {
+  current_streak_days: number;
+  longest_streak_days: number;
+  by_class: ClassStreak[];
+}
+export function getStreaks(): Promise<Streaks> {
+  return invoke("get_streaks");
 }
 
 export interface ProposedBlock { task_id: number; task_title: string; course_code: string; planned_date: string; planned_minutes: number; reason: string; }

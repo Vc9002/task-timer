@@ -3,9 +3,10 @@
   font-size: 14px;
   line-height: 1.5;
   color-scheme: light dark;
-  --bg: #f7f9fb;
-  --surface: #ffffff;
-  --sidebar: #eef2f6;
+  --window-opacity: 1;
+  --bg: color-mix(in srgb, #f7f9fb var(--window-opacity-pct, 100%), transparent);
+  --surface: color-mix(in srgb, #ffffff var(--window-opacity-pct, 100%), transparent);
+  --sidebar: color-mix(in srgb, #eef2f6 var(--window-opacity-pct, 100%), transparent);
   --text: #202d3a;
   --muted: #657586;
   --line: #dce3e9;
@@ -18,7 +19,8 @@
   background: var(--bg);
 }
 * { box-sizing: border-box; }
-body { margin: 0; min-width: 320px; }
+body { margin: 0; min-width: 320px; background: transparent; }
+html { background: transparent; }
 button, input, select, textarea { font: inherit; }
 button { display: inline-flex; align-items: center; justify-content: center; gap: .45rem; min-height: 32px; padding: .38rem .8rem; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); color: var(--text); cursor: pointer; font-weight: 500; }
 button:hover:not(:disabled) { background: var(--hover); border-color: var(--muted); }
@@ -42,7 +44,9 @@ main.container { width: 100%; max-width: 1000px; margin: 0 auto; padding: 2.6rem
 .error, [role=alert] { color: var(--danger); font-size: .9rem; }
 kbd { font: 11px ui-monospace, monospace; padding: 1px 4px; border: 1px solid var(--line); border-radius: 4px; color: var(--muted); }
 @media (prefers-color-scheme: dark) {
-  :root { --bg: #1c242d; --surface: #222d38; --sidebar: #18212a; --text: #e5edf4; --muted: #9aabba; --line: #344451; --accent: #7fc8b9; --accent-soft: #243d3e; --danger: #f09998; --hover: #2a3743; --shadow: 0 12px 40px #0005; }
-  button.primary, button[type=submit] { color: #132b2a; }
+  :root:not([data-theme]) { --bg: color-mix(in srgb, #1c242d var(--window-opacity-pct, 100%), transparent); --surface: color-mix(in srgb, #222d38 var(--window-opacity-pct, 100%), transparent); --sidebar: color-mix(in srgb, #18212a var(--window-opacity-pct, 100%), transparent); --text: #e5edf4; --muted: #9aabba; --line: #344451; --accent: #7fc8b9; --accent-soft: #243d3e; --danger: #f09998; --hover: #2a3743; --shadow: 0 12px 40px #0005; }
+  :root:not([data-theme]) button.primary, :root:not([data-theme]) button[type=submit] { color: #132b2a; }
 }
+:root[data-theme="dark"] { --bg: color-mix(in srgb, #1c242d var(--window-opacity-pct, 100%), transparent); --surface: color-mix(in srgb, #222d38 var(--window-opacity-pct, 100%), transparent); --sidebar: color-mix(in srgb, #18212a var(--window-opacity-pct, 100%), transparent); --text: #e5edf4; --muted: #9aabba; --line: #344451; --accent: #7fc8b9; --accent-soft: #243d3e; --danger: #f09998; --hover: #2a3743; --shadow: 0 12px 40px #0005; }
+:root[data-theme="dark"] button.primary, :root[data-theme="dark"] button[type=submit] { color: #132b2a; }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation: none !important; transition: none !important; } }

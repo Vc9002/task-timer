@@ -1,7 +1,10 @@
+mod cloud_backup;
 mod commands;
 mod db;
 mod desktop;
+mod exam_countdown;
 mod export;
+mod focus_mode;
 mod idle;
 mod reminders;
 mod timer;
@@ -11,7 +14,8 @@ mod weekly_review;
 
 use commands::analytics::{
     get_analytics_month, get_analytics_today, get_analytics_week, get_day_view,
-    get_estimate_analytics, get_estimate_suggestion, get_task_history, get_weekly_review,
+    get_estimate_analytics, get_estimate_suggestion, get_streaks, get_task_history,
+    get_weekly_review,
 };
 use commands::classes::{archive_class, create_class, list_classes, update_class};
 use commands::dependencies::{add_task_dependency, list_task_dependencies, remove_task_dependency};
@@ -60,6 +64,8 @@ pub fn run() {
         .plugin(autostart.build())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .setup(|app| {
             let app_data_dir = app
                 .path()
@@ -70,11 +76,23 @@ pub fn run() {
             if let Err(error) = todoist::sync::recover_inflight_outbox(&app.state::<Db>()) {
                 eprintln!("Todoist outbox recovery: {error}");
             }
+            #[cfg(target_os = "macos")]
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window_vibrancy::apply_vibrancy(
+                    &window,
+                    window_vibrancy::NSVisualEffectMaterial::UnderWindowBackground,
+                    None,
+                    None,
+                );
+            }
             tray::setup(app.handle())?;
             desktop::setup(app.handle())?;
             reminders::setup(app.handle());
             idle::setup(app.handle());
             weekly_review::setup(app.handle());
+            exam_countdown::setup(app.handle());
+            focus_mode::setup(app.handle());
+            cloud_backup::setup(app.handle());
 
             // Todoist is intentionally opt-in at runtime. Avoid reading the OS
             // keychain during startup; users can sync explicitly from Settings.
@@ -84,6 +102,11 @@ pub fn run() {
         .on_window_event(|window, event| {
             if matches!(event, tauri::WindowEvent::Focused(true)) {
                 reminders::wake(window.app_handle());
+            }
+            if window.label() == "quick-capture"
+                && matches!(event, tauri::WindowEvent::Focused(false))
+            {
+                let _ = window.hide();
             }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 let hide = window
@@ -99,6 +122,12 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            focus_mode::set_focus_mode,
+            focus_mode::get_focus_mode,
+            cloud_backup::get_cloud_backup_settings,
+            cloud_backup::save_cloud_backup_settings,
+            cloud_backup::run_cloud_backup_now,
+            cloud_backup::pick_cloud_backup_folder,
             reminders::notification_settings,
             reminders::save_notification_settings,
             reminders::test_notification,
@@ -113,6 +142,8 @@ pub fn run() {
             desktop::set_autostart,
             tray::take_desktop_action,
             tray::list_startable_tasks,
+            tray::hide_quick_capture,
+            tray::toggle_mini_timer,
             tray::set_tray_pomodoro_status,
             list_classes,
             create_class,
@@ -183,6 +214,7 @@ pub fn run() {
             get_estimate_analytics,
             get_estimate_suggestion,
             get_weekly_review,
+            get_streaks,
             get_todoist_status,
             get_todoist_outbox_status,
             set_todoist_token,

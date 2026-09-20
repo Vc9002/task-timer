@@ -60,6 +60,7 @@
                   {#if task.remaining_minutes !== null}· {task.remaining_minutes}m remaining{/if}
                 </span>
               </div>
+              <button class="quiet" onclick={() => timerStore.start(task.id, task.title)}>Start</button>
             </li>
           {/each}
         </ol>
@@ -94,6 +95,8 @@ header { display: flex; justify-content: space-between; align-items: end; gap: 1
   .next-up h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 10px; }
   .next-up ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
   .next-up li { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; }
+  .next-up li > div { flex: 1; min-width: 0; }
+  .next-up li > button { flex-shrink: 0; }
   .next-up .rank { font-size: 12px; font-weight: 700; color: var(--muted); width: 16px; }
   .next-up strong { display: block; font-size: 13px; }
   .next-up .meta { font-size: 11px; color: var(--muted); }

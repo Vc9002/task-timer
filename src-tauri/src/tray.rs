@@ -36,6 +36,39 @@ pub fn show(app: &AppHandle) {
     }
 }
 
+/// Shows the small always-on-top quick-capture popover without touching the
+/// main window, so adding a task doesn't interrupt whatever you're doing.
+pub fn show_quick_capture(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("quick-capture") {
+        let _ = window.center();
+        let _ = window.show();
+        let _ = window.set_focus();
+        let _ = app.emit("quick-capture-shown", ());
+    }
+}
+
+#[tauri::command]
+pub fn hide_quick_capture(app: AppHandle) {
+    if let Some(window) = app.get_webview_window("quick-capture") {
+        let _ = window.hide();
+    }
+}
+
+#[tauri::command]
+pub fn toggle_mini_timer(app: AppHandle) -> Result<bool, String> {
+    let Some(window) = app.get_webview_window("mini-timer") else {
+        return Err("Mini timer window unavailable".into());
+    };
+    let visible = window.is_visible().map_err(|e| e.to_string())?;
+    if visible {
+        window.hide().map_err(|e| e.to_string())?;
+    } else {
+        window.show().map_err(|e| e.to_string())?;
+        window.set_focus().map_err(|e| e.to_string())?;
+    }
+    Ok(!visible)
+}
+
 pub fn open_action(app: &AppHandle, action: &str) {
     if let Some(state) = app.try_state::<TrayState>() {
         if let Ok(mut pending) = state.pending.lock() {
@@ -137,13 +170,14 @@ pub fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let pomodoro = MenuItem::with_id(app, "pomodoro", "Pomodoro: off", false, None::<&str>)?;
     let start = MenuItem::with_id(app, "start", "Start / Switch Task…", true, None::<&str>)?;
     let quick = MenuItem::with_id(app, "quick", "Quick Add…", true, None::<&str>)?;
+    let mini = MenuItem::with_id(app, "mini", "Toggle Mini Timer", true, None::<&str>)?;
     let open = MenuItem::with_id(app, "open", "Open TaskTimer", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit TaskTimer", true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
     let menu = Menu::with_items(
         app,
         &[
-            &label, &pause, &finish, &pomodoro, &start, &quick, &open, &separator, &quit,
+            &label, &pause, &finish, &pomodoro, &start, &quick, &mini, &open, &separator, &quit,
         ],
     )?;
     let mut builder = TrayIconBuilder::with_id("tasktimer")
@@ -155,7 +189,10 @@ pub fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     builder
         .on_menu_event(|app, event| match event.id.as_ref() {
             "start" => open_action(app, "start-task"),
-            "quick" => open_action(app, "quick-add"),
+            "quick" => show_quick_capture(app),
+            "mini" => {
+                let _ = toggle_mini_timer(app.clone());
+            }
             "open" => show(app),
             "quit" => app.exit(0),
             "pause" | "finish" => timer_action(app, event.id.as_ref()),

@@ -102,6 +102,11 @@ fn check(app: &AppHandle) -> Result<Option<Duration>, String> {
         if !settings.enabled {
             return Ok(None);
         }
+        if crate::focus_mode::is_active(app) {
+            // Defer rather than consume the notification: it should still
+            // fire once Focus Mode is turned off.
+            return Ok(Some(Duration::from_secs(5 * 60)));
+        }
         let Some(active) =
             timer::core_get_active_session(&conn).map_err(|_| "Couldn't read timer")?
         else {

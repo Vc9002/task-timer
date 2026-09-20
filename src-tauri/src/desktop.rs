@@ -11,17 +11,18 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 pub struct Settings {
     pub close_to_tray: bool,
     pub start_hidden: bool,
-    pub shortcuts: [String; 3],
+    pub shortcuts: Vec<String>,
 }
 impl Default for Settings {
     fn default() -> Self {
         Self {
             close_to_tray: cfg!(any(target_os = "macos", target_os = "windows")),
             start_hidden: false,
-            shortcuts: [
+            shortcuts: vec![
                 "CommandOrControl+Shift+Y".into(),
                 "CommandOrControl+Shift+Space".into(),
                 "CommandOrControl+Shift+F".into(),
+                "CommandOrControl+Shift+A".into(),
             ],
         }
     }
@@ -60,7 +61,7 @@ fn parse_shortcuts(settings: &Settings) -> Result<Vec<(Shortcut, usize)>, String
 fn register(app: &AppHandle, shortcut: Shortcut, action: usize) -> Result<(), String> {
     app.global_shortcut().on_shortcut(shortcut, move |app, _, event| {
         if event.state == ShortcutState::Pressed {
-            match action { 0 => tray::open_action(app,"start-task"), 1 => tray::timer_action(app,"pause"), _ => tray::timer_action(app,"finish") }
+            match action { 0 => tray::open_action(app,"start-task"), 1 => tray::timer_action(app,"pause"), 2 => tray::timer_action(app,"finish"), _ => tray::show_quick_capture(app) }
         }
     }).map_err(|_| "That shortcut couldn't be registered. It may be used by another application; choose another combination.".into())
 }
@@ -81,8 +82,17 @@ pub fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
             .unwrap_or_default();
         // Cmd/Ctrl+Shift+T is Chrome's reopen-closed-tab shortcut. Migrate
         // only the shipped default; preserve any user-selected shortcut.
-        if settings.shortcuts[0] == "CommandOrControl+Shift+T" {
+        let mut dirty = false;
+        if settings.shortcuts.first().map(String::as_str) == Some("CommandOrControl+Shift+T") {
             settings.shortcuts[0] = "CommandOrControl+Shift+Y".into();
+            dirty = true;
+        }
+        // Migrate settings saved before the quick-add shortcut slot existed.
+        if settings.shortcuts.len() < 4 {
+            settings.shortcuts.push("CommandOrControl+Shift+A".into());
+            dirty = true;
+        }
+        if dirty {
             conn.execute(
                 "INSERT INTO app_settings(key,value) VALUES('desktop_v02',?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                 [serde_json::to_string(&settings)?],
@@ -180,7 +190,7 @@ mod tests {
     use super::*;
     #[test]
     fn defaults_and_disabled_shortcuts_are_valid() {
-        assert_eq!(parse_shortcuts(&Settings::default()).unwrap().len(), 3);
+        assert_eq!(parse_shortcuts(&Settings::default()).unwrap().len(), 4);
         assert!(parse_shortcuts(&Settings {
             shortcuts: Default::default(),
             ..Settings::default()

@@ -395,7 +395,7 @@ fn breakdowns(samples: &[EstimateSample], by_class: bool) -> Vec<EstimateBreakdo
         };
         grouped.entry(key).or_default().push(sample);
     }
-    grouped
+    let mut result: Vec<EstimateBreakdown> = grouped
         .into_iter()
         .map(|(key, values)| {
             let mut estimates: Vec<i64> = values.iter().map(|s| s.estimated_minutes).collect();
@@ -418,7 +418,10 @@ fn breakdowns(samples: &[EstimateSample], by_class: bool) -> Vec<EstimateBreakdo
                 median_error_percent: median(&mut errors),
             }
         })
-        .collect()
+        .collect();
+    // Leaderboard order: worst (largest absolute) estimate error first.
+    result.sort_by_key(|b| std::cmp::Reverse(b.median_error_percent.abs()));
+    result
 }
 
 fn session_stats(
@@ -801,4 +804,157 @@ pub fn get_weekly_review(db: State<Db>, start_date: String) -> Result<WeeklyRevi
         blocks: block_summary(&conn, &start_date, &end_date).map_err(|e| e.to_string())?,
         workload: workload_days(&conn, &start_date, &end_date).map_err(|e| e.to_string())?,
     })
+}
+
+#[derive(Debug, Serialize)]
+pub struct ClassStreak {
+    pub class_id: i64,
+    pub course_code: String,
+    pub current_streak_days: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct Streaks {
+    pub current_streak_days: i64,
+    pub longest_streak_days: i64,
+    pub by_class: Vec<ClassStreak>,
+}
+
+/// Counts consecutive local-calendar days with tracked time, walking
+/// backward from `today`. A day with zero tracked seconds breaks the streak
+/// immediately, except `today` itself: if you haven't studied yet today the
+/// streak still counts through yesterday (so it doesn't reset before you've
+/// had a chance to act on it).
+fn current_streak(days_with_time: &std::collections::BTreeSet<NaiveDate>, today: NaiveDate) -> i64 {
+    let mut streak = 0;
+    let mut day = today;
+    if !days_with_time.contains(&day) {
+        day -= Duration::days(1);
+    }
+    while days_with_time.contains(&day) {
+        streak += 1;
+        day -= Duration::days(1);
+    }
+    streak
+}
+
+fn longest_streak(days_with_time: &std::collections::BTreeSet<NaiveDate>) -> i64 {
+    let mut longest = 0;
+    let mut current = 0;
+    let mut prev: Option<NaiveDate> = None;
+    for &day in days_with_time {
+        match prev {
+            Some(p) if day == p + Duration::days(1) => current += 1,
+            _ => current = 1,
+        }
+        longest = longest.max(current);
+        prev = Some(day);
+    }
+    longest
+}
+
+fn tracked_days(
+    conn: &rusqlite::Connection,
+    class_id: Option<i64>,
+) -> rusqlite::Result<std::collections::BTreeSet<NaiveDate>> {
+    let sql = format!(
+        "SELECT DISTINCT date(ts.start_ts,'localtime') FROM time_sessions ts
+         JOIN tasks t ON t.id = ts.task_id
+         WHERE ts.end_ts IS NOT NULL AND {DURATION_EXPR} > 0
+         {}",
+        if class_id.is_some() {
+            "AND t.class_id = ?1"
+        } else {
+            ""
+        }
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let map_row = |row: &rusqlite::Row| -> rusqlite::Result<String> { row.get(0) };
+    let rows: Vec<String> = if let Some(id) = class_id {
+        stmt.query_map([id], map_row)?.collect::<Result<_, _>>()?
+    } else {
+        stmt.query_map([], map_row)?.collect::<Result<_, _>>()?
+    };
+    Ok(rows
+        .into_iter()
+        .filter_map(|d| NaiveDate::parse_from_str(&d, "%Y-%m-%d").ok())
+        .collect())
+}
+
+#[tauri::command]
+pub fn get_streaks(db: State<Db>) -> Result<Streaks, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let today = chrono::Local::now().date_naive();
+    let all_days = tracked_days(&conn, None).map_err(|e| e.to_string())?;
+    let classes: Vec<(i64, String)> = conn
+        .prepare("SELECT id, course_code FROM classes ORDER BY course_code")
+        .map_err(|e| e.to_string())?
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .map_err(|e| e.to_string())?
+        .collect::<Result<_, _>>()
+        .map_err(|e| e.to_string())?;
+    let mut by_class = Vec::new();
+    for (class_id, course_code) in classes {
+        let days = tracked_days(&conn, Some(class_id)).map_err(|e| e.to_string())?;
+        let streak = current_streak(&days, today);
+        if streak > 0 {
+            by_class.push(ClassStreak {
+                class_id,
+                course_code,
+                current_streak_days: streak,
+            });
+        }
+    }
+    by_class.sort_by_key(|c| std::cmp::Reverse(c.current_streak_days));
+    Ok(Streaks {
+        current_streak_days: current_streak(&all_days, today),
+        longest_streak_days: longest_streak(&all_days),
+        by_class,
+    })
+}
+
+#[cfg(test)]
+mod streak_tests {
+    use super::*;
+
+    fn date(s: &str) -> NaiveDate {
+        NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap()
+    }
+
+    #[test]
+    fn counts_consecutive_days_ending_today() {
+        let days = [date("2026-09-18"), date("2026-09-19"), date("2026-09-20")]
+            .into_iter()
+            .collect();
+        assert_eq!(current_streak(&days, date("2026-09-20")), 3);
+    }
+
+    #[test]
+    fn keeps_streak_alive_before_todays_first_session() {
+        let days = [date("2026-09-18"), date("2026-09-19")]
+            .into_iter()
+            .collect();
+        assert_eq!(current_streak(&days, date("2026-09-20")), 2);
+    }
+
+    #[test]
+    fn breaks_streak_on_gap_day() {
+        let days = [date("2026-09-17"), date("2026-09-19"), date("2026-09-20")]
+            .into_iter()
+            .collect();
+        assert_eq!(current_streak(&days, date("2026-09-20")), 2);
+    }
+
+    #[test]
+    fn longest_streak_finds_best_historical_run() {
+        let days = [
+            date("2026-09-01"),
+            date("2026-09-02"),
+            date("2026-09-03"),
+            date("2026-09-10"),
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(longest_streak(&days), 3);
+    }
 }

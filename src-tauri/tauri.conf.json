@@ -10,13 +10,43 @@
     "frontendDist": "../build"
   },
   "app": {
+    "macOSPrivateApi": true,
     "windows": [
       {
         "title": "TaskTimer",
         "width": 980,
         "height": 700,
         "minWidth": 600,
-        "minHeight": 480
+        "minHeight": 480,
+        "transparent": true
+      },
+      {
+        "label": "quick-capture",
+        "url": "/quick-capture",
+        "title": "Quick Add",
+        "width": 460,
+        "height": 110,
+        "resizable": false,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false,
+        "center": true,
+        "shadow": true
+      },
+      {
+        "label": "mini-timer",
+        "url": "/mini-timer",
+        "title": "TaskTimer — Mini",
+        "width": 300,
+        "height": 64,
+        "resizable": false,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false,
+        "transparent": true,
+        "shadow": true
       }
     ],
     "security": {
@@ -33,5 +63,14 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "active": true,
+      "endpoints": [
+        "https://github.com/Vc9002/task-timer/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDkxQkQxMzFENUI5MTlDOApSV1RJR2JuVk1kRWJDV0pTeG1mYlFReUFXUndxK2xGQVR5SlFaRUxrZGxwSkpCVXh6VVd4eHZnVQo="
+    }
   }
 }

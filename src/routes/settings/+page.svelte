@@ -1,11 +1,13 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import DesktopSettings from "$lib/components/DesktopSettings.svelte";
+  import ThemeSettings from "$lib/components/ThemeSettings.svelte";
   import StudyCapacitySettings from "$lib/components/StudyCapacitySettings.svelte";
   import TemplateSettings from "$lib/components/TemplateSettings.svelte";
   import PomodoroSettings from "$lib/components/PomodoroSettings.svelte";
   import IdleSettings from "$lib/components/IdleSettings.svelte";
   import WeeklyReviewSettings from "$lib/components/WeeklyReviewSettings.svelte";
+  import CloudBackupSettings from "$lib/components/CloudBackupSettings.svelte";
   import {
     getTodoistStatus,
     setTodoistToken,
@@ -139,6 +141,7 @@
 <main class="container">
   <h1>Settings</h1>
   <p class="page-intro">Make TaskTimer work the way you do.</p>
+  <ThemeSettings />
   <DesktopSettings />
 
   <section>
@@ -158,6 +161,7 @@
   <PomodoroSettings />
   <IdleSettings />
   <WeeklyReviewSettings />
+  <CloudBackupSettings />
   <TemplateSettings />
 
   {#if error}<p class="error">{error}</p>{/if}

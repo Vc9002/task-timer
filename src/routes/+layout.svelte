@@ -3,6 +3,8 @@
   import { page } from "$app/stores";
   import { timerStore } from "$lib/stores/timer.svelte";
   import { pomodoroStore } from "$lib/stores/pomodoro.svelte";
+  import { updaterStore } from "$lib/stores/updater.svelte";
+  import { themeStore } from "$lib/stores/theme.svelte";
   import Modal from "$lib/components/Modal.svelte";
   import { formatHms } from "$lib/format";
   import QuickAdd from "$lib/components/QuickAdd.svelte";
@@ -17,11 +19,40 @@
   let focusMode = $state(false);
 
   let { children } = $props();
+  let isQuickCapture = $derived($page.url.pathname === "/quick-capture");
+  let isMiniTimer = $derived($page.url.pathname === "/mini-timer");
+  let isBareWindow = $derived(isQuickCapture || isMiniTimer);
 
   onMount(() => {
+    if (isQuickCapture) return;
+    if (isMiniTimer) {
+      themeStore.load();
+      timerStore.mount();
+      let disposed = false;
+      const unlisteners: UnlistenFn[] = [];
+      const addListener = (promise: Promise<UnlistenFn>) => void promise.then(unlisten => { if (disposed) unlisten(); else unlisteners.push(unlisten); }).catch(() => {});
+      addListener(listen("timer-changed", () => { void timerStore.refresh(); timerStore.revision++; }));
+      const refresh = () => { if (document.visibilityState === "visible") void timerStore.refresh(); };
+      window.addEventListener("focus", refresh);
+      document.addEventListener("visibilitychange", refresh);
+      return () => {
+        disposed = true;
+        unlisteners.forEach(unlisten => unlisten());
+        timerStore.destroy();
+        window.removeEventListener("focus", refresh);
+        document.removeEventListener("visibilitychange", refresh);
+      };
+    }
+    const onKeydown = (event: KeyboardEvent) => {
+      if (!event.repeat && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); openCommandPalette(); }
+    };
+    window.addEventListener("keydown", onKeydown);
     timerStore.mount();
     void pomodoroStore.loadSettings();
+    void updaterStore.checkInBackground();
+    themeStore.load();
     focusMode = localStorage.getItem("tasktimer-focus-mode") === "true";
+    void invoke("set_focus_mode", { active: focusMode });
     let disposed = false;
     const unlisteners: UnlistenFn[] = [];
     const addListener = (promise: Promise<UnlistenFn>) => void promise.then(unlisten => { if (disposed) unlisten(); else unlisteners.push(unlisten); }).catch(() => timerStore.error = "Desktop controls couldn't connect. Reopen TaskTimer.");
@@ -43,6 +74,7 @@
       disposed = true;
       unlisteners.forEach(unlisten => unlisten());
       timerStore.destroy();
+      window.removeEventListener("keydown", onKeydown);
       window.removeEventListener("focus", refresh);
       window.removeEventListener("pageshow", refresh);
       document.removeEventListener("visibilitychange", refresh);
@@ -56,6 +88,7 @@
   function toggleFocusMode() {
     focusMode = !focusMode;
     localStorage.setItem("tasktimer-focus-mode", String(focusMode));
+    void invoke("set_focus_mode", { active: focusMode });
   }
 
   const links = [
@@ -92,17 +125,26 @@
   }
 </script>
 
+{#if isBareWindow}
+  {@render children()}
+{:else}
 {#if pickerOpen}<TaskPicker onclose={() => pickerOpen = false} />{/if}
 {#if commandPaletteOpen}
   <CommandPalette onclose={() => commandPaletteOpen = false} onquickadd={openQuickAdd} onstart={() => pickerOpen = true} />
 {/if}
 
-<svelte:window onkeydown={(event) => {
-  if (!event.repeat && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); openCommandPalette(); }
-}} />
-
 {#if quickAddOpen}
   <QuickAdd onclose={() => quickAddOpen = false} />
+{/if}
+
+{#if updaterStore.ready}
+  <div class="update-toast" role="status">
+    <span>An update has been downloaded.</span>
+    <button class="primary" disabled={updaterStore.installing} onclick={() => updaterStore.restartNow()}>
+      {updaterStore.installing ? "Restarting…" : "Restart now"}
+    </button>
+    <button class="quiet" onclick={() => updaterStore.dismiss()}>Later</button>
+  </div>
 {/if}
 
 {#if timerStore.conflict}
@@ -167,12 +209,14 @@
       <span class="label"><small>{timerStore.active.is_paused ? "Paused" : "Now tracking"} · {timerStore.active.class_course_code}</small><strong>{timerStore.active.task_title}</strong></span>
       <span class="clock">{formatHms(timerStore.displaySeconds)}</span>
       <button onclick={toggleFocusMode}>{focusMode ? "Exit Focus" : "Focus"}</button>
+      <button onclick={() => invoke("toggle_mini_timer")}>Mini Timer</button>
       <button disabled={timerStore.busy} onclick={togglePause}><Icon name={timerStore.active.is_paused ? "play" : "pause"} size={15} />{timerStore.active.is_paused ? "Resume" : "Pause"}</button>
       <button disabled={timerStore.busy} onclick={finish} class="primary"><Icon name="check" size={16} />Finish</button>
     </div>
   {/if}
   </div>
 </div>
+{/if}
 
 <style>
 .shell { display: flex; height: 100dvh; overflow: hidden; }
@@ -201,6 +245,7 @@
   .focus-mode .content { max-width: 1080px; width: 100%; margin-inline: auto; }
   .content { overflow-y: auto; flex: 1; }
   .app-error { padding: 8px 20px; border-bottom: 1px solid var(--line); }
+  .update-toast { position: fixed; right: 20px; bottom: 20px; z-index: 50; display: flex; align-items: center; gap: 10px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); box-shadow: var(--shadow); font-size: 13px; }
   .timer-bar { display: flex; align-items: center; gap: 12px; flex-shrink: 0; padding: 16px 24px; border-top: 1px solid var(--line); background: var(--surface); }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
   .dot.paused { background: #c59442; }
