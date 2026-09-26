@@ -224,6 +224,21 @@ pub fn run() {
             sync_todoist_now,
             complete_todoist_task,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            // macOS sends this when the user clicks the dock icon while the
+            // main window is hidden (e.g. after closing to tray) with no
+            // other windows visible; without this, clicking the dock icon
+            // does nothing and the app looks unrecoverable.
+            if let tauri::RunEvent::Reopen {
+                has_visible_windows,
+                ..
+            } = event
+            {
+                if !has_visible_windows {
+                    tray::show(app_handle);
+                }
+            }
+        });
 }
