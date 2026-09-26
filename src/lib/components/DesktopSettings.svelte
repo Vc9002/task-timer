@@ -59,10 +59,10 @@
         <label><input type="checkbox" checked={autostart} onchange={e => login(e.currentTarget.checked)} /> Start TaskTimer when I log in</label>
         <label><input type="checkbox" bind:checked={settings.start_hidden} /> Start hidden when launched at login</label>
         <h3>Global shortcuts</h3>
-        {#each ["Start / Switch Task", "Pause / Resume", "Finish Timer", "Quick Add Task"] as label, i}
+        {#each ["Start / Switch Task", "Pause / Resume", "Finish Timer", "Quick Capture Popover"] as label, i}
           <label>{label}<input bind:value={settings.shortcuts[i]} spellcheck="false" /></label>
         {/each}
-        <p>Use CommandOrControl+Shift+Y format. Start / Switch defaults to Cmd/Ctrl+Shift+Y so Chrome can keep Cmd/Ctrl+Shift+T for reopening a closed tab. Leave blank to disable an action. Cmd/Ctrl+K opens Quick Add inside TaskTimer.</p>
+        <p>Use CommandOrControl+Shift+Y format. Start / Switch defaults to Cmd/Ctrl+Shift+Y so Chrome can keep Cmd/Ctrl+Shift+T for reopening a closed tab. Leave blank to disable an action. Quick Capture Popover opens a small floating add-task bar without switching to TaskTimer's main window. Cmd/Ctrl+K opens the full Quick Add form inside TaskTimer.</p>
         <button type="submit">Save desktop settings</button>
       </fieldset>
     </form>

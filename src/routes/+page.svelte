@@ -1,6 +1,7 @@
 <script lang="ts">
   import TaskTreeNode from "$lib/components/TaskTreeNode.svelte";
   import PlannerPanel from "$lib/components/PlannerPanel.svelte";
+  import Icon from "$lib/components/Icon.svelte";
   import { getToday, type TodaySummary } from "$lib/api";
   import { timerStore } from "$lib/stores/timer.svelte";
   import { formatDurationShort, localDate } from "$lib/format";
@@ -60,7 +61,7 @@
                   {#if task.remaining_minutes !== null}· {task.remaining_minutes}m remaining{/if}
                 </span>
               </div>
-              <button class="quiet" onclick={() => timerStore.start(task.id, task.title)}>Start</button>
+              <button class="start-btn" onclick={() => timerStore.start(task.id, task.title)}><Icon name="play" size={13} />Start</button>
             </li>
           {/each}
         </ol>
@@ -97,6 +98,8 @@ header { display: flex; justify-content: space-between; align-items: end; gap: 1
   .next-up li { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; }
   .next-up li > div { flex: 1; min-width: 0; }
   .next-up li > button { flex-shrink: 0; }
+  .start-btn { background: var(--accent-soft); color: var(--accent); border-color: transparent; font-size: 12px; font-weight: 600; }
+  .start-btn:hover:not(:disabled) { background: var(--accent); color: white; }
   .next-up .rank { font-size: 12px; font-weight: 700; color: var(--muted); width: 16px; }
   .next-up strong { display: block; font-size: 13px; }
   .next-up .meta { font-size: 11px; color: var(--muted); }

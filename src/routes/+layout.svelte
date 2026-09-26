@@ -24,7 +24,10 @@
   let isBareWindow = $derived(isQuickCapture || isMiniTimer);
 
   onMount(() => {
-    if (isQuickCapture) return;
+    if (isQuickCapture) {
+      themeStore.load();
+      return;
+    }
     if (isMiniTimer) {
       themeStore.load();
       timerStore.mount();
@@ -209,7 +212,7 @@
       <span class="label"><small>{timerStore.active.is_paused ? "Paused" : "Now tracking"} · {timerStore.active.class_course_code}</small><strong>{timerStore.active.task_title}</strong></span>
       <span class="clock">{formatHms(timerStore.displaySeconds)}</span>
       <button onclick={toggleFocusMode}>{focusMode ? "Exit Focus" : "Focus"}</button>
-      <button onclick={() => invoke("toggle_mini_timer")}>Mini Timer</button>
+      <button onclick={() => void invoke("toggle_mini_timer").catch(() => {})}>Mini Timer</button>
       <button disabled={timerStore.busy} onclick={togglePause}><Icon name={timerStore.active.is_paused ? "play" : "pause"} size={15} />{timerStore.active.is_paused ? "Resume" : "Pause"}</button>
       <button disabled={timerStore.busy} onclick={finish} class="primary"><Icon name="check" size={16} />Finish</button>
     </div>
