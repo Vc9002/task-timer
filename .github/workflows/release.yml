@@ -36,3 +36,30 @@ jobs:
           releaseName: "TaskTimer ${{ github.ref_name }}"
           releaseDraft: false
           prerelease: false
+
+      # Works around a tauri-action bug where it renames the uploaded
+      # .app.tar.gz asset (adding an arch suffix) but then looks up its
+      # signature under the original unrenamed filename, so it silently
+      # skips generating latest.json. Build it ourselves instead.
+      - name: Generate and upload latest.json
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          SIG_PATH="src-tauri/target/aarch64-apple-darwin/release/bundle/macos/TaskTimer.app.tar.gz.sig"
+          SIGNATURE=$(cat "$SIG_PATH")
+          VERSION="${GITHUB_REF_NAME#v}"
+          URL="https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}/TaskTimer_aarch64.app.tar.gz"
+          cat > latest.json <<EOF
+          {
+            "version": "${VERSION}",
+            "notes": "See the GitHub release for details.",
+            "pub_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "platforms": {
+              "darwin-aarch64": {
+                "signature": "${SIGNATURE}",
+                "url": "${URL}"
+              }
+            }
+          }
+          EOF
+          gh release upload "${GITHUB_REF_NAME}" latest.json --clobber --repo "${{ github.repository }}"
