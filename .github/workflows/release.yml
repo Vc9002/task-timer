@@ -25,30 +25,36 @@ jobs:
         with:
           path: ~/.cargo
           key: ${{ runner.os }}-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
-      - uses: tauri-apps/tauri-action@v0
+      - run: npx tauri build --target aarch64-apple-darwin
+
+      # tauri-action isn't used here: its own updater-artifact packaging has
+      # a bug where it renames the uploaded .app.tar.gz (adding an arch
+      # suffix) but looks up its signature under the original unrenamed
+      # filename, silently skipping latest.json — then deletes the .sig
+      # file during its own cleanup regardless, so nothing downstream can
+      # recover it either. `cargo tauri build` alone doesn't produce
+      # updater artifacts at all (that packaging lives only in
+      # tauri-action's code), so we replicate it ourselves: tar the .app,
+      # sign it with the Tauri CLI, and publish everything by hand.
+      - name: Package, sign, and publish release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        with:
-          args: --target aarch64-apple-darwin
-          tagName: ${{ github.ref_name }}
-          releaseName: "TaskTimer ${{ github.ref_name }}"
-          releaseDraft: false
-          prerelease: false
-
-      # Works around a tauri-action bug where it renames the uploaded
-      # .app.tar.gz asset (adding an arch suffix) but then looks up its
-      # signature under the original unrenamed filename, so it silently
-      # skips generating latest.json. Build it ourselves instead.
-      - name: Generate and upload latest.json
-        env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          SIG_PATH="src-tauri/target/aarch64-apple-darwin/release/bundle/macos/TaskTimer.app.tar.gz.sig"
-          SIGNATURE=$(cat "$SIG_PATH")
+          set -euo pipefail
+          BUNDLE_DIR="src-tauri/target/aarch64-apple-darwin/release/bundle"
+          DMG=$(find "$BUNDLE_DIR/dmg" -name '*.dmg')
+          APP_DIR="$BUNDLE_DIR/macos/TaskTimer.app"
+          TARBALL="$BUNDLE_DIR/macos/TaskTimer_aarch64.app.tar.gz"
+
+          tar czf "$TARBALL" -C "$(dirname "$APP_DIR")" "$(basename "$APP_DIR")"
+          npx tauri signer sign "$TARBALL"
+          SIGNATURE=$(cat "$TARBALL.sig")
+
           VERSION="${GITHUB_REF_NAME#v}"
-          URL="https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}/TaskTimer_aarch64.app.tar.gz"
+          URL="https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}/$(basename "$TARBALL")"
+
           cat > latest.json <<EOF
           {
             "version": "${VERSION}",
@@ -62,4 +68,9 @@ jobs:
             }
           }
           EOF
-          gh release upload "${GITHUB_REF_NAME}" latest.json --clobber --repo "${{ github.repository }}"
+
+          gh release create "${GITHUB_REF_NAME}" \
+            --repo "${{ github.repository }}" \
+            --title "TaskTimer ${GITHUB_REF_NAME}" \
+            --notes "See commit history for details." \
+            "$DMG" "$TARBALL" latest.json
