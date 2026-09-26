@@ -4357,7 +4357,6 @@ dependencies = [
  "tauri-plugin-single-instance",
  "tauri-plugin-updater",
  "uuid",
- "window-vibrancy",
 ]
 
 [[package]]

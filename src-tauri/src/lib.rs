@@ -76,15 +76,9 @@ pub fn run() {
             if let Err(error) = todoist::sync::recover_inflight_outbox(&app.state::<Db>()) {
                 eprintln!("Todoist outbox recovery: {error}");
             }
-            #[cfg(target_os = "macos")]
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window_vibrancy::apply_vibrancy(
-                    &window,
-                    window_vibrancy::NSVisualEffectMaterial::UnderWindowBackground,
-                    None,
-                    None,
-                );
-            }
+            app.manage(tray::QuickCaptureState {
+                shown_at: std::sync::Mutex::new(std::time::Instant::now()),
+            });
             tray::setup(app.handle())?;
             desktop::setup(app.handle())?;
             reminders::setup(app.handle());
@@ -105,6 +99,7 @@ pub fn run() {
             }
             if window.label() == "quick-capture"
                 && matches!(event, tauri::WindowEvent::Focused(false))
+                && !tray::quick_capture_blur_is_spurious(window.app_handle())
             {
                 let _ = window.hide();
             }
@@ -116,6 +111,7 @@ pub fn run() {
                     .unwrap_or(false);
                 if hide && window.hide().is_ok() {
                     api.prevent_close();
+                    desktop::notify_hidden_to_tray_once(window.app_handle());
                 } else {
                     window.app_handle().exit(0);
                 }

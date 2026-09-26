@@ -1,11 +1,39 @@
 use crate::{db::Db, timer};
 use serde::Serialize;
-use std::{sync::Mutex, thread, time::Duration};
+use std::{
+    sync::Mutex,
+    thread,
+    time::{Duration, Instant},
+};
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::TrayIconBuilder,
     AppHandle, Emitter, Manager,
 };
+
+pub struct QuickCaptureState {
+    pub shown_at: Mutex<Instant>,
+}
+
+/// A window can report a spurious focus-loss right as it's first shown (a
+/// race between show() and set_focus() completing), which would otherwise
+/// hide the popover immediately after opening it. Ignore blur events within
+/// this window after showing.
+const BLUR_GRACE_PERIOD: Duration = Duration::from_millis(400);
+
+/// Whether a `Focused(false)` event on the quick-capture window this soon
+/// after showing it should be ignored as spurious.
+pub fn quick_capture_blur_is_spurious(app: &AppHandle) -> bool {
+    app.try_state::<QuickCaptureState>()
+        .map(|state| {
+            state
+                .shown_at
+                .lock()
+                .map(|shown_at| shown_at.elapsed() < BLUR_GRACE_PERIOD)
+                .unwrap_or(false)
+        })
+        .unwrap_or(false)
+}
 
 pub struct TrayState {
     label: MenuItem<tauri::Wry>,
@@ -40,6 +68,11 @@ pub fn show(app: &AppHandle) {
 /// main window, so adding a task doesn't interrupt whatever you're doing.
 pub fn show_quick_capture(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("quick-capture") {
+        if let Some(state) = app.try_state::<QuickCaptureState>() {
+            if let Ok(mut shown_at) = state.shown_at.lock() {
+                *shown_at = Instant::now();
+            }
+        }
         let _ = window.center();
         let _ = window.show();
         let _ = window.set_focus();

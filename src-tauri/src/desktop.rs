@@ -1,10 +1,35 @@
 use crate::{db::Db, tray};
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
-use std::sync::Mutex;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Mutex,
+};
 use tauri::{AppHandle, Manager};
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
+use tauri_plugin_notification::NotificationExt;
+
+struct HiddenToTrayNotice(AtomicBool);
+
+/// Closing the window just hides it (see `close_to_tray`), with no other
+/// feedback — without this, it can look like the app crashed or quit.
+/// Explain it once per run, the first time it happens.
+pub fn notify_hidden_to_tray_once(app: &AppHandle) {
+    let already_shown = app
+        .try_state::<HiddenToTrayNotice>()
+        .map(|state| state.0.swap(true, Ordering::Relaxed))
+        .unwrap_or(true);
+    if already_shown {
+        return;
+    }
+    let _ = app
+        .notification()
+        .builder()
+        .title("TaskTimer is still running")
+        .body("It's in your menu bar — click the tray icon to bring it back.")
+        .show();
+}
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -66,6 +91,7 @@ fn register(app: &AppHandle, shortcut: Shortcut, action: usize) -> Result<(), St
     }).map_err(|_| "That shortcut couldn't be registered. It may be used by another application; choose another combination.".into())
 }
 pub fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+    app.manage(HiddenToTrayNotice(AtomicBool::new(false)));
     let settings = {
         let db = app.state::<Db>();
         let conn = db.0.lock().map_err(|_| "Settings unavailable")?;

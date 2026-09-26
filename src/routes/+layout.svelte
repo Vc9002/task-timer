@@ -176,6 +176,11 @@
     {#if timerStore.error}<p role="alert">{timerStore.error}</p>{/if}
   </Modal>
 {/if}
+{#if focusMode}
+  <button class="focus-exit" onclick={toggleFocusMode} title="Exit Focus Mode">
+    <Icon name="close" size={13} /> Exit Focus
+  </button>
+{/if}
 <div class="shell" class:focus-mode={focusMode}>
   <aside class="sidebar">
     <a href="/" class="brand"><span class="brand-icon"><Icon name="clock" size={21} /></span>TaskTimer</a>
@@ -249,6 +254,8 @@
   .content { overflow-y: auto; flex: 1; }
   .app-error { padding: 8px 20px; border-bottom: 1px solid var(--line); }
   .update-toast { position: fixed; right: 20px; bottom: 20px; z-index: 50; display: flex; align-items: center; gap: 10px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); box-shadow: var(--shadow); font-size: 13px; }
+  .focus-exit { position: fixed; top: 14px; right: 14px; z-index: 50; display: flex; align-items: center; gap: 6px; padding: 6px 12px; font-size: 12px; border-radius: 20px; background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow); color: var(--muted); }
+  .focus-exit:hover { color: var(--text); background: var(--hover); }
   .timer-bar { display: flex; align-items: center; gap: 12px; flex-shrink: 0; padding: 16px 24px; border-top: 1px solid var(--line); background: var(--surface); }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
   .dot.paused { background: #c59442; }

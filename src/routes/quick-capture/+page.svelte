@@ -80,6 +80,13 @@
 </script>
 
 <div class="capture">
+  <button
+    type="button"
+    class="close-btn"
+    aria-label="Close"
+    title="Close (Esc)"
+    onclick={() => void invoke("hide_quick_capture")}
+  >&times;</button>
   <form onsubmit={e => { e.preventDefault(); void submit(); }}>
     <input
       bind:this={input}
@@ -96,10 +103,12 @@
 
 <style>
   :global(html), :global(body) { background: transparent; }
-  .capture { padding: 14px 16px; background: var(--surface); height: 100vh; box-sizing: border-box; border: 1px solid var(--line); border-radius: 10px; }
+  .capture { position: relative; padding: 14px 16px; background: var(--surface); height: 100vh; box-sizing: border-box; border: 1px solid var(--line); border-radius: 10px; }
   form { display: flex; gap: 8px; }
   input { flex: 1; min-height: 38px; font-size: 14px; }
   button { min-height: 38px; }
   .error { color: var(--danger); font-size: 12px; margin: 8px 0 0; }
   .hint { color: var(--muted); font-size: 11px; margin: 8px 0 0; }
+  .close-btn { position: absolute; top: 6px; right: 8px; min-height: 0; width: 20px; height: 20px; padding: 0; border: 0; background: transparent; color: var(--muted); font-size: 16px; line-height: 1; border-radius: 50%; }
+  .close-btn:hover { background: var(--hover); color: var(--text); }
 </style>

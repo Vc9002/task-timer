@@ -1,10 +1,18 @@
 <script lang="ts">
+  import { invoke } from "@tauri-apps/api/core";
   import { timerStore } from "$lib/stores/timer.svelte";
   import { formatHms } from "$lib/format";
   import Icon from "$lib/components/Icon.svelte";
 </script>
 
 <div class="mini" data-tauri-drag-region>
+  <button
+    type="button"
+    class="close-btn"
+    aria-label="Close mini timer"
+    title="Close"
+    onclick={() => void invoke("toggle_mini_timer")}
+  >&times;</button>
   {#if timerStore.active}
     <span
       class="dot"
@@ -32,7 +40,9 @@
 
 <style>
   :global(html), :global(body) { background: transparent; }
-  .mini { display: flex; align-items: center; gap: 10px; height: 100vh; box-sizing: border-box; padding: 0 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+  .mini { position: relative; display: flex; align-items: center; gap: 10px; height: 100vh; box-sizing: border-box; padding: 0 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+  .close-btn { position: absolute; top: 3px; right: 5px; min-height: 0; width: 16px; height: 16px; padding: 0; border: 0; background: transparent; color: var(--muted); font-size: 13px; line-height: 1; border-radius: 50%; z-index: 1; }
+  .close-btn:hover { background: var(--hover); color: var(--text); }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: #4caf6a; flex-shrink: 0; }
   .dot.paused { background: #c59442; }
   .dot.error { background: var(--danger); }
