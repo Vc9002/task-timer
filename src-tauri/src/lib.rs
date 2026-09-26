@@ -226,18 +226,20 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|app_handle, event| {
-            // macOS sends this when the user clicks the dock icon while the
-            // main window is hidden (e.g. after closing to tray) with no
-            // other windows visible; without this, clicking the dock icon
-            // does nothing and the app looks unrecoverable.
+        .run(|_app_handle, _event| {
+            // macOS sends RunEvent::Reopen when the dock icon is clicked
+            // while the main window is hidden (e.g. after closing to tray)
+            // with no other windows visible; without handling it, clicking
+            // the dock icon does nothing and the app looks unrecoverable.
+            // The Reopen variant only exists on macOS builds.
+            #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Reopen {
                 has_visible_windows,
                 ..
-            } = event
+            } = _event
             {
                 if !has_visible_windows {
-                    tray::show(app_handle);
+                    tray::show(_app_handle);
                 }
             }
         });
