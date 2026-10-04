@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import DesktopSettings from "$lib/components/DesktopSettings.svelte";
   import ThemeSettings from "$lib/components/ThemeSettings.svelte";
+  import UpdateSettings from "$lib/components/UpdateSettings.svelte";
   import StudyCapacitySettings from "$lib/components/StudyCapacitySettings.svelte";
   import TemplateSettings from "$lib/components/TemplateSettings.svelte";
   import PomodoroSettings from "$lib/components/PomodoroSettings.svelte";
@@ -141,6 +142,7 @@
 <main class="container">
   <h1>Settings</h1>
   <p class="page-intro">Make TaskTimer work the way you do.</p>
+  <UpdateSettings />
   <ThemeSettings />
   <DesktopSettings />
 
