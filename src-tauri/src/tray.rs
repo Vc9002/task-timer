@@ -114,7 +114,7 @@ pub fn open_action(app: &AppHandle, action: &str) {
 
 #[tauri::command]
 pub fn take_desktop_action(app: AppHandle) -> Option<String> {
-    app.state::<TrayState>().pending.lock().ok()?.take()
+    app.try_state::<TrayState>()?.pending.lock().ok()?.take()
 }
 
 pub fn timer_action(app: &AppHandle, action: &str) {
@@ -213,6 +213,15 @@ pub fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
             &label, &pause, &finish, &pomodoro, &start, &quick, &mini, &open, &separator, &quit,
         ],
     )?;
+    // Manage the state before the tray icon is built: building it can fire
+    // events that read TrayState, and state() panics if it isn't registered.
+    app.manage(TrayState {
+        label,
+        pause,
+        finish,
+        pomodoro,
+        pending: Mutex::new(None),
+    });
     let mut builder = TrayIconBuilder::with_id("tasktimer")
         .tooltip("TaskTimer")
         .menu(&menu);
@@ -232,13 +241,6 @@ pub fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
             _ => {}
         })
         .build(app)?;
-    app.manage(TrayState {
-        label,
-        pause,
-        finish,
-        pomodoro,
-        pending: Mutex::new(None),
-    });
     refresh(app)?;
     let handle = app.clone();
     thread::spawn(move || loop {
