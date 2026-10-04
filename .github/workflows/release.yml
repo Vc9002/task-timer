@@ -9,7 +9,13 @@ permissions:
   contents: write
 
 jobs:
-  release:
+  # Both platform jobs only build and sign. They upload their artifacts to
+  # the workflow run; the publish job below creates the GitHub release once,
+  # with a single latest.json that lists every platform. Creating the release
+  # from each job would race (second `gh release create` fails) and each job
+  # would overwrite the other's latest.json.
+
+  macos:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -30,47 +36,114 @@ jobs:
       # tauri-action isn't used here: its own updater-artifact packaging has
       # a bug where it renames the uploaded .app.tar.gz (adding an arch
       # suffix) but looks up its signature under the original unrenamed
-      # filename, silently skipping latest.json — then deletes the .sig
-      # file during its own cleanup regardless, so nothing downstream can
-      # recover it either. `cargo tauri build` alone doesn't produce
-      # updater artifacts at all (that packaging lives only in
-      # tauri-action's code), so we replicate it ourselves: tar the .app,
-      # sign it with the Tauri CLI, and publish everything by hand.
-      - name: Package, sign, and publish release
+      # filename, silently skipping latest.json, then deletes the .sig file
+      # during its own cleanup. `cargo tauri build` alone doesn't produce
+      # updater artifacts either, so we tar the .app and sign it ourselves.
+      - name: Package and sign updater artifact
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           BUNDLE_DIR="src-tauri/target/aarch64-apple-darwin/release/bundle"
-          DMG=$(find "$BUNDLE_DIR/dmg" -name '*.dmg')
           APP_DIR="$BUNDLE_DIR/macos/TaskTimer.app"
           TARBALL="$BUNDLE_DIR/macos/TaskTimer_aarch64.app.tar.gz"
-
           tar czf "$TARBALL" -C "$(dirname "$APP_DIR")" "$(basename "$APP_DIR")"
           npx tauri signer sign "$TARBALL"
-          SIGNATURE=$(cat "$TARBALL.sig")
+          mkdir -p artifacts
+          cp "$TARBALL" "$TARBALL.sig" "$BUNDLE_DIR"/dmg/*.dmg artifacts/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: artifacts/*
+          if-no-files-found: error
 
-          VERSION="${GITHUB_REF_NAME#v}"
-          URL="https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}/$(basename "$TARBALL")"
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cargo
+          key: ${{ runner.os }}-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
+      - run: npx tauri build --bundles nsis
 
-          cat > latest.json <<EOF
-          {
-            "version": "${VERSION}",
-            "notes": "See the GitHub release for details.",
-            "pub_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-            "platforms": {
-              "darwin-aarch64": {
-                "signature": "${SIGNATURE}",
-                "url": "${URL}"
+      # Tauri v2 on Windows uses the NSIS installer .exe itself as the updater
+      # payload, so the signed artifact is the setup .exe and its .sig.
+      - name: Sign updater artifact
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          EXE=$(find src-tauri/target/release/bundle/nsis -name '*-setup.exe' | head -n 1)
+          test -n "$EXE"
+          npx tauri signer sign "$EXE"
+          mkdir -p artifacts
+          cp "$EXE" "$EXE.sig" artifacts/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: artifacts/*
+          if-no-files-found: error
+
+  publish:
+    needs: [macos, windows]
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Check tag matches app version
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          APP_VERSION=$(jq -r .version src-tauri/tauri.conf.json)
+          if [ "$TAG_VERSION" != "$APP_VERSION" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match tauri.conf.json version $APP_VERSION" >&2
+            exit 1
+          fi
+
+      - name: Write latest.json and create release
+        run: |
+          set -euo pipefail
+          BASE="https://github.com/${{ github.repository }}/releases/download/${GITHUB_REF_NAME}"
+          MAC_TAR=$(basename artifacts/TaskTimer_aarch64.app.tar.gz)
+          WIN_EXE=$(basename artifacts/*-setup.exe)
+          DMG=$(ls artifacts/*.dmg)
+
+          jq -n \
+            --arg version "${GITHUB_REF_NAME#v}" \
+            --arg pub_date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --rawfile mac_sig "artifacts/${MAC_TAR}.sig" \
+            --rawfile win_sig "artifacts/${WIN_EXE}.sig" \
+            --arg mac_url "$BASE/$MAC_TAR" \
+            --arg win_url "$BASE/$WIN_EXE" \
+            '{
+              version: $version,
+              notes: "See the GitHub release for details.",
+              pub_date: $pub_date,
+              platforms: {
+                "darwin-aarch64": { signature: ($mac_sig | rtrimstr("\n")), url: $mac_url },
+                "windows-x86_64": { signature: ($win_sig | rtrimstr("\n")), url: $win_url }
               }
-            }
-          }
-          EOF
+            }' > latest.json
 
           gh release create "${GITHUB_REF_NAME}" \
             --repo "${{ github.repository }}" \
             --title "TaskTimer ${GITHUB_REF_NAME}" \
             --notes "See commit history for details." \
-            "$DMG" "$TARBALL" latest.json
+            "$DMG" "artifacts/${MAC_TAR}" "artifacts/${WIN_EXE}" latest.json
