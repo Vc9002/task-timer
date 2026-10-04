@@ -52,7 +52,7 @@ jobs:
           npx tauri signer sign "$TARBALL"
           mkdir -p artifacts
           cp "$TARBALL" "$TARBALL.sig" "$BUNDLE_DIR"/dmg/*.dmg artifacts/
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: macos
           path: artifacts/*
@@ -90,7 +90,7 @@ jobs:
           npx tauri signer sign "$EXE"
           mkdir -p artifacts
           cp "$EXE" "$EXE.sig" artifacts/
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: windows
           path: artifacts/*
