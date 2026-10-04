@@ -5,6 +5,8 @@ class UpdaterStore {
   ready = $state(false);
   installing = $state(false);
   error = $state<string | null>(null);
+  checking = $state(false);
+  notice = $state<string | null>(null);
   private pending: Update | null = null;
 
   async checkInBackground() {
@@ -16,6 +18,29 @@ class UpdaterStore {
       this.ready = true;
     } catch (error) {
       this.error = error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  // Manual check from Settings. Unlike checkInBackground, it reports the
+  // outcome to the user, including "already up to date".
+  async checkNow() {
+    this.checking = true;
+    this.notice = null;
+    this.error = null;
+    try {
+      const update = await check();
+      if (!update) {
+        this.notice = "You're on the latest version.";
+        return;
+      }
+      await update.downloadAndInstall();
+      this.pending = update;
+      this.ready = true;
+      this.notice = `Version ${update.version} downloaded. Restart to finish updating.`;
+    } catch (error) {
+      this.error = error instanceof Error ? error.message : String(error);
+    } finally {
+      this.checking = false;
     }
   }
 
