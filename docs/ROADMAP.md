@@ -158,3 +158,38 @@ Local-first academic planning and time intelligence for macOS, with optional Tod
 - Keep idle CPU near zero; tray elapsed updates should remain minute-based.
 - Continue monitoring WAL growth and use `PRAGMA optimize` periodically.
 - Keep Analytics and Settings routes code-split as the app grows.
+
+## Windows product-readiness pass (2026-10-27)
+
+The repository review indicates strong feature coverage and a credible local-first academic-planning direction. Treat the following as a prioritized readiness plan, not measured user-testing scores or a claim that every reported issue has been reproduced on the current checkout. Reconcile each item against current code and CI before closing it.
+
+### P0 — Make Pomodoro state trustworthy
+
+- Replace interval-decrement timing with timestamp-derived remaining time so UI suspension and sleep do not accumulate drift.
+- Persist the active phase, cycle count, and timing anchors; restore or explicitly resolve an interrupted Pomodoro after restart.
+- Make automatic transitions, Skip, Stop, and reset share consistent task-timer pause/resume behavior. In particular, stopping during a break must not strand a task timer paused.
+- Add focused coverage for sleep/wake, delayed ticks, app restart, and each transition while a task timer is running or manually paused.
+
+### P1 — Windows behavior and release validation
+
+- Implement Windows-native idle detection. The existing roadmap describes macOS `HIDIdleTime` polling; that does not establish Windows idle detection. Verify Windows behavior rather than silently treating unsupported `ioreg` calls as success.
+- Add Windows CI coverage for Rust and frontend checks, then exercise the packaged NSIS installer and updater on a clean Windows 11 account or VM.
+- Walk through tray behavior, shortcuts, notifications and permissions, startup behavior, sleep/wake recovery, and backup/restore on Windows. Record OS/build, app version, and results.
+- Reproduce the reported `npm audit` failure against the current lockfile, identify the vulnerable dependency path, update compatible dependencies, and rerun CI. Do not apply a breaking downgrade without evidence.
+
+### P2 — First-run and distribution readiness
+
+- Test installation and first launch as someone with no repository or development environment: setup, permissions, initial task/session, close/reopen, and recovery after sleep.
+- Clarify first-run guidance, empty states, and how a task relates to Pomodoro sessions; evaluate an always-on-top Pomodoro countdown and completed-Pomodoro reporting after reliability work.
+- Document release steps, update behavior, support/bug-reporting path, and code-signing / Windows security-warning status. Verify these on an actual distributed build.
+- Run a small outside-user beta and use observed failures and confusion to prioritize polish before calling the app public-launch ready.
+
+### Exit criteria
+
+1. A two-hour Windows study session remains accurate through UI suspension and system sleep; restart behavior is explicit and recoverable.
+2. Skip/stop/break transitions never leave the task timer in an unintended state.
+3. A clean Windows 11 install, update, launch, and backup/restore walkthrough completes with recorded evidence.
+4. CI is green on the supported Windows build path, including the dependency audit.
+5. At least a small outside-user walkthrough has no unresolved data-loss or timer-integrity issue.
+
+The earlier readiness estimate (3–7 focused days for a personal Windows daily driver, 2–4 weeks for a private beta, and 4–8+ weeks for a polished public v1.0) is a rough planning estimate only; Windows testing may change it. Do not treat feature maturity or successful packaging as proof of reliability.
