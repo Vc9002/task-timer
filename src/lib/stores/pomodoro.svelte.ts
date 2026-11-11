@@ -1,10 +1,10 @@
 import { getPomodoroSettings, notifyPomodoroPhase, setTrayPomodoroStatus, type PomodoroSettings } from "$lib/api";
 import { timerStore } from "$lib/stores/timer.svelte";
 import { formatHms } from "$lib/format";
-
-type Phase = "idle" | "work" | "break";
-const CYCLES_PER_LONG_BREAK = 4;
-const STORAGE_KEY = "tasktimer-pomodoro-v02";
+import {
+  STORAGE_KEY, isLongBreak, nextPhase, parsePersisted, phaseMinutes, secondsRemaining, trayLabel,
+  type ActivePhase, type Phase, type PersistedState,
+} from "$lib/pomodoro-machine";
 
 class PomodoroStore {
   phase = $state<Phase>("idle");
@@ -24,13 +24,13 @@ class PomodoroStore {
       // keep defaults; Settings page surfaces the real error on save
     }
     try {
-      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null");
-      if (saved && (saved.phase === "work" || saved.phase === "break") && Number.isFinite(saved.deadlineMs) && Number.isInteger(saved.completedWorkCycles)) {
+      const saved = parsePersisted(localStorage.getItem(STORAGE_KEY));
+      if (saved) {
         this.phase = saved.phase;
         this.deadlineMs = saved.deadlineMs;
         this.completedWorkCycles = saved.completedWorkCycles;
-        this.onLongBreak = saved.onLongBreak === true;
-        this.pausedSessionId = Number.isInteger(saved.pausedSessionId) ? saved.pausedSessionId : null;
+        this.onLongBreak = saved.onLongBreak;
+        this.pausedSessionId = saved.pausedSessionId;
         this.startTicking();
         void this.tick();
       }
@@ -43,7 +43,8 @@ class PomodoroStore {
 
   private persist() {
     if (this.phase === "idle") { localStorage.removeItem(STORAGE_KEY); return; }
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ phase: this.phase, deadlineMs: this.deadlineMs, completedWorkCycles: this.completedWorkCycles, onLongBreak: this.onLongBreak, pausedSessionId: this.pausedSessionId }));
+    const state: PersistedState = { phase: this.phase, deadlineMs: this.deadlineMs, completedWorkCycles: this.completedWorkCycles, onLongBreak: this.onLongBreak, pausedSessionId: this.pausedSessionId };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   }
 
   private async releaseOwnedPause(): Promise<boolean> {
@@ -71,13 +72,13 @@ class PomodoroStore {
   }
 
   private pushTrayStatus() {
-    const phaseLabel = this.phase === "work" ? "Focus" : this.onLongBreak ? "Long break" : "Break";
-    void setTrayPomodoroStatus(`Pomodoro: ${phaseLabel} ${formatHms(this.remainingSeconds)}`);
+    if (this.phase === "idle") return;
+    void setTrayPomodoroStatus(`Pomodoro: ${trayLabel(this.phase, this.onLongBreak)} ${formatHms(this.remainingSeconds)}`);
   }
 
   private async tick() {
     if (this.phase === "idle" || this.transitioning) return;
-    this.remainingSeconds = Math.max(0, Math.ceil((this.deadlineMs - Date.now()) / 1000));
+    this.remainingSeconds = secondsRemaining(this.deadlineMs, Date.now());
     if (this.remainingSeconds % 15 === 0) this.pushTrayStatus();
     if (this.remainingSeconds > 0) return;
     await this.transition();
@@ -94,24 +95,20 @@ class PomodoroStore {
           const id = timerStore.active.session.id;
           if (await this.pauseSession(id)) this.pausedSessionId = id;
         }
-        this.beginPhase("break");
+        this.beginPhase(nextPhase("work"));
       } else if (this.phase === "break") {
         if (!await this.releaseOwnedPause()) return;
-        this.beginPhase("work");
+        this.beginPhase(nextPhase("break"));
         void notifyPomodoroPhase("break_done");
       }
       this.pushTrayStatus();
     } finally { this.transitioning = false; }
   }
 
-  private beginPhase(phase: "work" | "break") {
+  private beginPhase(phase: ActivePhase) {
     this.phase = phase;
-    this.onLongBreak = phase === "break" && this.completedWorkCycles % CYCLES_PER_LONG_BREAK === 0;
-    const minutes = phase === "work"
-      ? this.settings.work_minutes
-      : this.onLongBreak
-        ? this.settings.long_break_minutes
-        : this.settings.break_minutes;
+    this.onLongBreak = isLongBreak(phase, this.completedWorkCycles);
+    const minutes = phaseMinutes(this.settings, phase, this.onLongBreak);
     this.remainingSeconds = minutes * 60;
     this.deadlineMs = Date.now() + minutes * 60_000;
     this.persist();
