@@ -57,6 +57,19 @@ class PomodoroStore {
     return true;
   }
 
+  // timerStore ignores a call while another change is in flight, so retry briefly.
+  private async pauseSession(id: number): Promise<boolean> {
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const active = timerStore.active;
+      if (active?.session.id !== id) return false;
+      if (active.is_paused) return true;
+      await timerStore.pause();
+      if (timerStore.active?.session.id === id && timerStore.active.is_paused) return true;
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    return false;
+  }
+
   private pushTrayStatus() {
     const phaseLabel = this.phase === "work" ? "Focus" : this.onLongBreak ? "Long break" : "Break";
     void setTrayPomodoroStatus(`Pomodoro: ${phaseLabel} ${formatHms(this.remainingSeconds)}`);
@@ -79,10 +92,7 @@ class PomodoroStore {
         this.completedWorkCycles += 1;
         if (timerStore.active && !timerStore.active.is_paused) {
           const id = timerStore.active.session.id;
-          await timerStore.pause();
-          if (timerStore.active?.session.id === id && timerStore.active.is_paused) {
-            this.pausedSessionId = id;
-          }
+          if (await this.pauseSession(id)) this.pausedSessionId = id;
         }
         this.beginPhase("break");
       } else if (this.phase === "break") {
