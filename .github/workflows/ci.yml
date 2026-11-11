@@ -75,14 +75,7 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Locate Windows SDK resource compiler
-        shell: pwsh
-        run: |
-          $rc = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Filter rc.exe -Recurse |
-            Where-Object { $_.DirectoryName -like '*\x64' } |
-            Sort-Object FullName -Descending | Select-Object -First 1
-          if (-not $rc) { throw 'Windows SDK rc.exe is required' }
-          Add-Content -Path $env:GITHUB_ENV -Value "RC=$($rc.FullName)"
+      - uses: ./.github/actions/windows-rc
       - uses: actions/setup-node@v4
         with:
           node-version: 20
