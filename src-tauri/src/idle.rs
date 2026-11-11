@@ -41,18 +41,48 @@ pub fn save_idle_threshold(db: tauri::State<Db>, minutes: i64) -> Result<(), Str
 
 /// Parses the `HIDIdleTime` line from `ioreg -c IOHIDSystem -d 4` output,
 /// which reports nanoseconds since the last keyboard/mouse event.
+#[cfg(any(target_os = "macos", test))]
 fn parse_idle_seconds(ioreg_output: &str) -> Option<f64> {
     let line = ioreg_output.lines().find(|l| l.contains("HIDIdleTime"))?;
     let ns: u64 = line.split('=').nth(1)?.trim().parse().ok()?;
     Some(ns as f64 / 1_000_000_000.0)
 }
 
+#[cfg(target_os = "macos")]
 fn system_idle_seconds() -> Option<f64> {
     let output = std::process::Command::new("ioreg")
         .args(["-c", "IOHIDSystem", "-d", "4"])
         .output()
         .ok()?;
     parse_idle_seconds(&String::from_utf8_lossy(&output.stdout))
+}
+
+#[cfg(target_os = "windows")]
+fn system_idle_seconds() -> Option<f64> {
+    use windows_sys::Win32::System::SystemInformation::GetTickCount64;
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
+
+    let mut last_input = LASTINPUTINFO {
+        cbSize: std::mem::size_of::<LASTINPUTINFO>() as u32,
+        dwTime: 0,
+    };
+    // GetLastInputInfo returns a 32-bit tick count. Wrapping subtraction keeps
+    // elapsed time valid after the Windows tick counter rolls over.
+    if unsafe { GetLastInputInfo(&mut last_input) } == 0 {
+        return None;
+    }
+    let now = unsafe { GetTickCount64() } as u32;
+    Some(windows_idle_seconds(now, last_input.dwTime))
+}
+
+#[cfg(any(target_os = "windows", test))]
+fn windows_idle_seconds(now: u32, last_input: u32) -> f64 {
+    now.wrapping_sub(last_input) as f64 / 1000.0
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn system_idle_seconds() -> Option<f64> {
+    None
 }
 
 fn check(app: &AppHandle) -> Result<(), String> {
@@ -114,5 +144,10 @@ mod tests {
     fn threshold_defaults_to_five_minutes() {
         let conn = crate::db::test_connection();
         assert_eq!(threshold_minutes(&conn), 5);
+    }
+
+    #[test]
+    fn windows_tick_rollover_preserves_idle_duration() {
+        assert_eq!(windows_idle_seconds(1000, u32::MAX - 999), 2.0);
     }
 }

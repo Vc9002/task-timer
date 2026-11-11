@@ -39,6 +39,13 @@ See `src-tauri/src/` for the Rust side (`db/`, `timer/`, `todoist/`,
 - [Rust](https://www.rust-lang.org/tools/install) (stable toolchain)
 - [Node.js](https://nodejs.org/) 20+
 
+On Windows, install the Microsoft C++ build tools and WebView2 runtime before
+building the desktop app. Run Cargo and Tauri from a Visual Studio Developer
+PowerShell so the Windows SDK resource compiler (`rc.exe`) is on `PATH`.
+The release workflow produces a Windows NSIS setup
+executable and signs it for TaskTimer's in-app updater. Windows SmartScreen may
+still show a warning until the installer has an established signing reputation.
+
 ## Development
 
 ```bash
@@ -51,6 +58,11 @@ npm run tauri dev
 ```bash
 npm run tauri build
 ```
+
+Before a release, run `npm run verify:versions`, `npm run check`,
+`npm audit --audit-level=high`, and `cargo test --lib` from `src-tauri`.
+CI runs the frontend and Rust checks on Windows. A release tag must match the
+versions in both JavaScript and Rust manifests and lockfiles.
 
 Release builds use `codegen-units = 1`, `lto = true`, and `panic = "abort"`
 (see `src-tauri/Cargo.toml`) to keep the binary small.

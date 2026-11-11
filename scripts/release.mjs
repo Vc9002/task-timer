@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Bumps package.json + src-tauri/tauri.conf.json in lockstep, tags, and pushes.
+// Bumps all app manifests and locks in lockstep, then tags locally.
 // Usage: node scripts/release.mjs <patch|minor|major|x.y.z>
 import { execSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -12,6 +12,14 @@ if (!bump) {
 
 const pkgPath = new URL("../package.json", import.meta.url);
 const confPath = new URL("../src-tauri/tauri.conf.json", import.meta.url);
+const npmLockPath = new URL("../package-lock.json", import.meta.url);
+const cargoPath = new URL("../src-tauri/Cargo.toml", import.meta.url);
+const cargoLockPath = new URL("../src-tauri/Cargo.lock", import.meta.url);
+
+if (execSync("git status --porcelain", { encoding: "utf8" }).trim()) {
+  console.error("Commit or stash working tree changes before creating a release.");
+  process.exit(1);
+}
 
 const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
 const [major, minor, patch] = pkg.version.split(".").map(Number);
@@ -37,7 +45,19 @@ const conf = JSON.parse(readFileSync(confPath, "utf8"));
 conf.version = nextVersion;
 writeFileSync(confPath, JSON.stringify(conf, null, 2) + "\n");
 
-execSync(`git add package.json src-tauri/tauri.conf.json`, { stdio: "inherit" });
+const npmLock = JSON.parse(readFileSync(npmLockPath, "utf8"));
+npmLock.version = nextVersion;
+npmLock.packages[""].version = nextVersion;
+writeFileSync(npmLockPath, JSON.stringify(npmLock, null, 2) + "\n");
+
+const cargo = readFileSync(cargoPath, "utf8").replace(/^version = "[^"]+"/m, `version = "${nextVersion}"`);
+writeFileSync(cargoPath, cargo);
+const cargoLock = readFileSync(cargoLockPath, "utf8").replace(/(\[\[package\]\]\s+name = "task-timer"\s+version = ")[^"]+"/m, (_, prefix) => `${prefix}${nextVersion}"`);
+writeFileSync(cargoLockPath, cargoLock);
+
+execSync("node scripts/verify-versions.mjs", { stdio: "inherit" });
+
+execSync("git add package.json package-lock.json src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/tauri.conf.json", { stdio: "inherit" });
 execSync(`git commit -m "chore: release v${nextVersion}"`, { stdio: "inherit" });
 execSync(`git tag v${nextVersion}`, { stdio: "inherit" });
 

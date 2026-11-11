@@ -29,14 +29,21 @@ impl Default for CloudBackupSettings {
 
 /// Best-effort default: macOS's iCloud Drive app-storage container, if present.
 /// Purely a convenience suggestion — the user can always pick a different folder.
+#[cfg(target_os = "macos")]
 fn default_icloud_folder() -> Option<String> {
     let home = dirs_home()?;
     let icloud = home.join("Library/Mobile Documents/com~apple~CloudDocs/TaskTimer Backups");
     Some(icloud.to_string_lossy().into_owned())
 }
 
+#[cfg(target_os = "macos")]
 fn dirs_home() -> Option<PathBuf> {
     std::env::var_os("HOME").map(PathBuf::from)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn default_icloud_folder() -> Option<String> {
+    None
 }
 
 fn settings(conn: &rusqlite::Connection) -> CloudBackupSettings {
@@ -197,6 +204,8 @@ mod tests {
         let conn = crate::db::test_connection();
         let s = settings(&conn);
         assert!(!s.enabled);
+        #[cfg(target_os = "windows")]
+        assert!(s.folder.is_none());
     }
 
     #[test]

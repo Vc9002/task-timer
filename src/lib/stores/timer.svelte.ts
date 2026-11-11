@@ -124,7 +124,7 @@ class TimerStore {
       this.applyActive(null); this.recovery = false;
     });
   }
-  mount() { this.disposed = false; void this.refresh(true); }
+  async mount() { this.disposed = false; await this.refresh(true); }
   destroy() {
     this.disposed = true;
     ++this.request;

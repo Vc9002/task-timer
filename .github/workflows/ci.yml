@@ -15,6 +15,7 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
+      - run: npm run verify:versions
       - run: npm run check
       - run: npm run build
       - run: npm audit --audit-level=high
@@ -63,6 +64,39 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+      - run: cargo fmt --check
+        working-directory: src-tauri
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+        working-directory: src-tauri
+      - run: cargo test --lib
+        working-directory: src-tauri
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Locate Windows SDK resource compiler
+        shell: pwsh
+        run: |
+          $rc = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Filter rc.exe -Recurse |
+            Where-Object { $_.DirectoryName -like '*\x64' } |
+            Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $rc) { throw 'Windows SDK rc.exe is required' }
+          Add-Content -Path $env:GITHUB_ENV -Value "RC=$($rc.FullName)"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: npm run build
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cargo
+          key: ${{ runner.os }}-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
       - run: cargo fmt --check
         working-directory: src-tauri
       - run: cargo clippy --all-targets --all-features -- -D warnings

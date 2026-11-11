@@ -30,7 +30,7 @@
     }
     if (isMiniTimer) {
       themeStore.load();
-      timerStore.mount();
+      void timerStore.mount();
       let disposed = false;
       const unlisteners: UnlistenFn[] = [];
       const addListener = (promise: Promise<UnlistenFn>) => void promise.then(unlisten => { if (disposed) unlisten(); else unlisteners.push(unlisten); }).catch(() => {});
@@ -50,8 +50,7 @@
       if (!event.repeat && (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); openCommandPalette(); }
     };
     window.addEventListener("keydown", onKeydown);
-    timerStore.mount();
-    void pomodoroStore.loadSettings();
+    void timerStore.mount().then(() => pomodoroStore.loadSettings());
     void updaterStore.checkInBackground();
     themeStore.load();
     focusMode = localStorage.getItem("tasktimer-focus-mode") === "true";

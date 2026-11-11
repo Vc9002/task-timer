@@ -9,7 +9,7 @@ class ThemeStore {
   mode = $state<ThemeMode>("system");
   accent = $state<string | null>(null);
   accentSoft = $state<string | null>(null);
-  opacity = $state(80);
+  opacity = $state(100);
 
   load() {
     const storedMode = localStorage.getItem(MODE_KEY);

@@ -39,9 +39,10 @@
 </div>
 
 <style>
-  :global(html), :global(body) { background: transparent; }
-  .mini { position: relative; display: flex; align-items: center; gap: 10px; height: 100vh; box-sizing: border-box; padding: 0 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
-  .close-btn { position: absolute; top: 3px; right: 5px; min-height: 0; width: 16px; height: 16px; padding: 0; border: 0; background: transparent; color: var(--muted); font-size: 13px; line-height: 1; border-radius: 50%; z-index: 1; }
+  :global(html), :global(body) { background: transparent; overflow: hidden; }
+  :global(body) { min-width: 0; }
+  .mini { position: relative; display: flex; align-items: center; gap: 6px; width: 100vw; height: 100vh; box-sizing: border-box; padding: 0 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+  .close-btn { order: 3; flex-shrink: 0; min-height: 0; width: 16px; height: 16px; padding: 0; border: 0; background: transparent; color: var(--muted); font-size: 13px; line-height: 1; border-radius: 50%; }
   .close-btn:hover { background: var(--hover); color: var(--text); }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: #4caf6a; flex-shrink: 0; }
   .dot.paused { background: #c59442; }

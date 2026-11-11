@@ -1,5 +1,27 @@
 # TaskTimer Roadmap
 
+## Windows infrastructure pass — 2026-11-11
+
+Windows is the primary validation target for this pass. The idle monitor now
+uses Windows `GetLastInputInfo` and handles tick rollover. Pomodoro remaining
+time is derived from a persisted deadline, and an app restart restores its
+phase. Skip and Stop share the normal transition logic; Stop releases a task
+timer pause owned by Pomodoro. The Windows CI job now runs frontend checks,
+Rust Clippy, and Rust tests. Release builds are gated on those checks and
+matching versions across both package manifests and lockfiles.
+
+Local evidence: `npm run check`, `npm run build`, `npm audit
+--audit-level=high`, `cargo fmt --check`, `cargo clippy --all-targets
+--all-features -- -D warnings`, and 91 Rust tests pass on Windows. The
+dependency update removed all high audit findings while leaving five low
+findings requiring a major SvelteKit upgrade. Tauri JavaScript packages are
+pinned to the installed Rust crate minor versions because a mixed minor set
+prevents bundling. `npx tauri build --bundles nsis` produced
+`TaskTimer_0.3.8_x64-setup.exe` on this Windows machine, and the native process
+stayed running during an eight-second startup smoke check. A clean-account
+installer/update walkthrough is still required before claiming distribution
+readiness. The smoke check did not verify isolated app-data use.
+
 ## Current status — 2026-09-17
 
 v0.3.3 productivity + academic planning/intelligence pass, including the Pomodoro feature, is implemented and native-validated. App version is tagged 0.3.3 across `package.json`, `Cargo.toml`, and `tauri.conf.json` (previously stuck at `0.1.0`).
