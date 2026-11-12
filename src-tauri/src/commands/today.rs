@@ -197,7 +197,7 @@ pub(crate) fn today_for(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_today(db: State<Db>, include_overdue: bool) -> Result<TodaySummary, String> {
     let conn = db.0.lock().map_err(|_| "Couldn't load Today")?;
     today_for(

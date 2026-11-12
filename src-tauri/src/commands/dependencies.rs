@@ -18,7 +18,7 @@ fn row_to_summary(row: &rusqlite::Row) -> rusqlite::Result<DependencySummary> {
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_task_dependencies(
     db: State<Db>,
     task_id: i64,

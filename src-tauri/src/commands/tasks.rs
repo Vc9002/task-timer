@@ -137,7 +137,7 @@ pub(crate) fn row_to_task(row: &rusqlite::Row) -> rusqlite::Result<Task> {
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_tasks_for_class(db: State<Db>, class_id: i64) -> Result<Vec<Task>, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
@@ -153,7 +153,7 @@ pub fn list_tasks_for_class(db: State<Db>, class_id: i64) -> Result<Vec<Task>, S
     result
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_inbox(db: State<Db>) -> Result<Vec<InboxTask>, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn

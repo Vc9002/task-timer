@@ -187,7 +187,7 @@ fn range_summary(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_analytics_today(db: State<Db>) -> Result<RangeSummary, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     range_summary(
@@ -197,7 +197,7 @@ pub fn get_analytics_today(db: State<Db>) -> Result<RangeSummary, String> {
     .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_analytics_week(db: State<Db>) -> Result<RangeSummary, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     range_summary(
@@ -207,7 +207,7 @@ pub fn get_analytics_week(db: State<Db>) -> Result<RangeSummary, String> {
     .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_analytics_month(db: State<Db>) -> Result<RangeSummary, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     range_summary(
@@ -217,7 +217,7 @@ pub fn get_analytics_month(db: State<Db>) -> Result<RangeSummary, String> {
     .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_day_view(db: State<Db>, date: String) -> Result<DayView, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
 
@@ -278,7 +278,7 @@ pub fn get_day_view(db: State<Db>, date: String) -> Result<DayView, String> {
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_task_history(db: State<Db>, task_id: i64) -> Result<TaskHistory, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     let estimated_minutes: Option<i64> = conn
@@ -492,7 +492,7 @@ fn block_summary(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_estimate_analytics(
     db: State<Db>,
     start_date: String,
@@ -585,7 +585,7 @@ fn suggestion_for(
     Some((median(&mut actuals), filtered.len() as i64))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_estimate_suggestion(
     db: State<Db>,
     class_id: i64,
@@ -735,7 +735,7 @@ fn schedule_coverage(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_weekly_review(db: State<Db>, start_date: String) -> Result<WeeklyReview, String> {
     let start = NaiveDate::parse_from_str(&start_date, "%Y-%m-%d")
         .map_err(|_| "Choose a valid start date.".to_string())?;
@@ -853,50 +853,44 @@ fn longest_streak(days_with_time: &std::collections::BTreeSet<NaiveDate>) -> i64
     longest
 }
 
-fn tracked_days(
+/// Days with tracked time, grouped by class, from a single scan of the sessions.
+fn tracked_days_by_class(
     conn: &rusqlite::Connection,
-    class_id: Option<i64>,
-) -> rusqlite::Result<std::collections::BTreeSet<NaiveDate>> {
+) -> rusqlite::Result<std::collections::HashMap<i64, std::collections::BTreeSet<NaiveDate>>> {
     let sql = format!(
-        "SELECT DISTINCT date(ts.start_ts,'localtime') FROM time_sessions ts
+        "SELECT DISTINCT t.class_id, date(ts.start_ts,'localtime') FROM time_sessions ts
          JOIN tasks t ON t.id = ts.task_id
-         WHERE ts.end_ts IS NOT NULL AND {DURATION_EXPR} > 0
-         {}",
-        if class_id.is_some() {
-            "AND t.class_id = ?1"
-        } else {
-            ""
-        }
+         WHERE ts.end_ts IS NOT NULL AND {DURATION_EXPR} > 0"
     );
     let mut stmt = conn.prepare(&sql)?;
-    let map_row = |row: &rusqlite::Row| -> rusqlite::Result<String> { row.get(0) };
-    let rows: Vec<String> = if let Some(id) = class_id {
-        stmt.query_map([id], map_row)?.collect::<Result<_, _>>()?
-    } else {
-        stmt.query_map([], map_row)?.collect::<Result<_, _>>()?
-    };
-    Ok(rows
-        .into_iter()
-        .filter_map(|d| NaiveDate::parse_from_str(&d, "%Y-%m-%d").ok())
-        .collect())
+    let rows = stmt.query_map([], |row| {
+        Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+    })?;
+    let mut by_class: std::collections::HashMap<i64, std::collections::BTreeSet<NaiveDate>> =
+        std::collections::HashMap::new();
+    for row in rows {
+        let (class_id, day) = row?;
+        if let Ok(day) = NaiveDate::parse_from_str(&day, "%Y-%m-%d") {
+            by_class.entry(class_id).or_default().insert(day);
+        }
+    }
+    Ok(by_class)
 }
 
-#[tauri::command]
-pub fn get_streaks(db: State<Db>) -> Result<Streaks, String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
-    let today = chrono::Local::now().date_naive();
-    let all_days = tracked_days(&conn, None).map_err(|e| e.to_string())?;
+fn streaks_for(conn: &rusqlite::Connection, today: NaiveDate) -> rusqlite::Result<Streaks> {
+    let days_by_class = tracked_days_by_class(conn)?;
+    let all_days: std::collections::BTreeSet<NaiveDate> =
+        days_by_class.values().flatten().copied().collect();
     let classes: Vec<(i64, String)> = conn
-        .prepare("SELECT id, course_code FROM classes ORDER BY course_code")
-        .map_err(|e| e.to_string())?
-        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
-        .map_err(|e| e.to_string())?
-        .collect::<Result<_, _>>()
-        .map_err(|e| e.to_string())?;
+        .prepare("SELECT id, course_code FROM classes ORDER BY course_code")?
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .collect::<Result<_, _>>()?;
     let mut by_class = Vec::new();
     for (class_id, course_code) in classes {
-        let days = tracked_days(&conn, Some(class_id)).map_err(|e| e.to_string())?;
-        let streak = current_streak(&days, today);
+        let Some(days) = days_by_class.get(&class_id) else {
+            continue;
+        };
+        let streak = current_streak(days, today);
         if streak > 0 {
             by_class.push(ClassStreak {
                 class_id,
@@ -911,6 +905,12 @@ pub fn get_streaks(db: State<Db>) -> Result<Streaks, String> {
         longest_streak_days: longest_streak(&all_days),
         by_class,
     })
+}
+
+#[tauri::command(async)]
+pub fn get_streaks(db: State<Db>) -> Result<Streaks, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    streaks_for(&conn, chrono::Local::now().date_naive()).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -956,5 +956,33 @@ mod streak_tests {
         .into_iter()
         .collect();
         assert_eq!(longest_streak(&days), 3);
+    }
+
+    #[test]
+    fn streaks_are_computed_per_class_from_one_scan() {
+        let conn = crate::db::test_connection();
+        conn.execute_batch(
+            "INSERT INTO classes(id,course_code,semester) VALUES (1,'AAA','Fall'),(2,'BBB','Fall'),(3,'CCC','Fall');
+             INSERT INTO tasks(id,class_id,title) VALUES (1,1,'a'),(2,2,'b'),(3,3,'c');
+             INSERT INTO time_sessions(task_id,start_ts,end_ts,final_duration_seconds) VALUES
+              (1,datetime('2026-09-18 12:00','utc'),datetime('2026-09-18 13:00','utc'),3600),
+              (1,datetime('2026-09-19 12:00','utc'),datetime('2026-09-19 13:00','utc'),3600),
+              (1,datetime('2026-09-20 12:00','utc'),datetime('2026-09-20 13:00','utc'),3600),
+              (2,datetime('2026-09-20 12:00','utc'),datetime('2026-09-20 13:00','utc'),3600),
+              (2,datetime('2026-09-20 14:00','utc'),datetime('2026-09-20 15:00','utc'),3600),
+              (3,datetime('2026-09-01 12:00','utc'),datetime('2026-09-01 13:00','utc'),3600),
+              (3,datetime('2026-09-20 16:00','utc'),datetime('2026-09-20 16:00','utc'),0);",
+        )
+        .unwrap();
+        let streaks = streaks_for(&conn, date("2026-09-20")).unwrap();
+        assert_eq!(streaks.current_streak_days, 3);
+        assert_eq!(streaks.longest_streak_days, 3);
+        let classes: Vec<(&str, i64)> = streaks
+            .by_class
+            .iter()
+            .map(|c| (c.course_code.as_str(), c.current_streak_days))
+            .collect();
+        // CCC's only recent session has zero duration, so it has no streak.
+        assert_eq!(classes, vec![("AAA", 3), ("BBB", 1)]);
     }
 }

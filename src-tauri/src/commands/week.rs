@@ -281,7 +281,7 @@ pub(crate) fn week_for(conn: &Connection, start_date: &str) -> rusqlite::Result<
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_week(db: State<Db>, start_date: String) -> Result<WeekSummary, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     week_for(&conn, &start_date).map_err(|e| e.to_string())

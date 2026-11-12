@@ -40,7 +40,7 @@ const EXAM_SELECT: &str = "SELECT e.id,e.class_id,c.course_code,e.title,e.exam_d
     COALESCE((SELECT SUM(COALESCE(ts.final_duration_seconds,0)) FROM time_sessions ts WHERE ts.task_id=e.study_task_id AND ts.end_ts IS NOT NULL),0),e.study_task_id
     FROM exams e JOIN classes c ON c.id=e.class_id";
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_exams(db: State<Db>) -> Result<Vec<Exam>, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     let result = conn
@@ -116,7 +116,7 @@ pub struct SemesterDashboard {
     pub classes: Vec<SemesterClassSummary>,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_semester_dashboard(
     db: State<Db>,
     semester: String,
