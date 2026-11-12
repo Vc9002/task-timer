@@ -106,18 +106,34 @@ pub async fn pick_cloud_backup_folder(app: AppHandle) -> Result<Option<String>, 
 }
 
 #[tauri::command]
-pub fn run_cloud_backup_now(app: AppHandle) -> Result<String, String> {
-    let db = app.state::<Db>();
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
-    let prefs = settings(&conn);
-    let folder = prefs.folder.ok_or("Choose a backup folder first.")?;
-    write_backup(&conn, &folder)
+pub async fn run_cloud_backup_now(app: AppHandle) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let (folder, bytes) = {
+            let db = app.state::<Db>();
+            let conn = db.0.lock().map_err(|e| e.to_string())?;
+            let folder = settings(&conn)
+                .folder
+                .ok_or("Choose a backup folder first.")?;
+            (folder, crate::export::backup(&conn)?)
+        };
+        write_backup_file(&folder, &bytes)
+    })
+    .await
+    .map_err(|_| "Couldn't run the backup".to_string())?
 }
 
+/// Serializes under the caller's lock and writes in one step. Only used where
+/// the caller has no lock to give up, such as tests.
+#[cfg(test)]
 fn write_backup(conn: &rusqlite::Connection, folder: &str) -> Result<String, String> {
+    write_backup_file(folder, &crate::export::backup(conn)?)
+}
+
+/// File I/O only. The backup folder may be a slow synced or network path, so
+/// callers must not hold the database lock while this runs.
+fn write_backup_file(folder: &str, bytes: &[u8]) -> Result<String, String> {
     let dir = PathBuf::from(folder);
     std::fs::create_dir_all(&dir).map_err(|e| format!("Couldn't create backup folder: {e}"))?;
-    let bytes = crate::export::backup(conn)?;
     let filename = format!(
         "task-timer-{}.json",
         chrono::Local::now().format("%Y-%m-%d_%H%M%S")
@@ -162,27 +178,37 @@ fn mark_ran(conn: &rusqlite::Connection, key: &str) -> Result<(), String> {
         [key],
     )
     .map_err(|e| e.to_string())?;
+    // Only today's marker matters; don't let one row per day pile up forever.
+    conn.execute(
+        "DELETE FROM app_settings WHERE key LIKE 'cloud_backup_last_run_%' AND key != ?1",
+        [key],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
 fn check(app: &AppHandle) -> Result<(), String> {
     let db = app.state::<Db>();
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
-    let prefs = settings(&conn);
-    if !prefs.enabled {
-        return Ok(());
-    }
-    let Some(folder) = prefs.folder.clone() else {
-        return Ok(());
+    let (folder, key, bytes) = {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        let prefs = settings(&conn);
+        if !prefs.enabled {
+            return Ok(());
+        }
+        let Some(folder) = prefs.folder else {
+            return Ok(());
+        };
+        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        let key = format!("cloud_backup_last_run_{today}");
+        if already_ran_today(&conn, &key) {
+            return Ok(());
+        }
+        (folder, key, crate::export::backup(&conn)?)
     };
-    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-    let key = format!("cloud_backup_last_run_{today}");
-    if already_ran_today(&conn, &key) {
-        return Ok(());
-    }
-    write_backup(&conn, &folder)?;
-    mark_ran(&conn, &key)?;
-    Ok(())
+    // The lock is released before touching the (possibly slow) backup folder.
+    write_backup_file(&folder, &bytes)?;
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    mark_ran(&conn, &key)
 }
 
 pub fn setup(app: &AppHandle) {

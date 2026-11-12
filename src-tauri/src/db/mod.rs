@@ -62,12 +62,22 @@ pub fn open(app_data_dir: &Path) -> rusqlite::Result<Connection> {
     std::fs::create_dir_all(app_data_dir).expect("failed to create app data dir");
     let db_path = app_data_dir.join("task-timer.sqlite");
     let conn = Connection::open(db_path)?;
-    conn.execute_batch(
-        "PRAGMA journal_mode = WAL;
-         PRAGMA foreign_keys = ON;",
-    )?;
+    configure(&conn)?;
     run_migrations(&conn)?;
     Ok(conn)
+}
+
+/// WAL with synchronous=NORMAL is SQLite's recommended pairing: commits stop
+/// forcing an fsync each time, and the database stays consistent after a crash
+/// (only the last few commits can be lost on sudden power loss, never corrupted).
+fn configure(conn: &Connection) -> rusqlite::Result<()> {
+    conn.busy_timeout(std::time::Duration::from_secs(5))?;
+    conn.execute_batch(
+        "PRAGMA journal_mode = WAL;
+         PRAGMA synchronous = NORMAL;
+         PRAGMA temp_store = MEMORY;
+         PRAGMA foreign_keys = ON;",
+    )
 }
 
 fn run_migrations(conn: &Connection) -> rusqlite::Result<()> {
@@ -247,5 +257,26 @@ mod tests {
                 1
             );
         }
+    }
+
+    #[test]
+    fn open_configures_wal_and_foreign_keys() {
+        let dir = std::env::temp_dir().join(format!("tt-db-open-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let conn = open(&dir).unwrap();
+        let mode: String = conn
+            .query_row("PRAGMA journal_mode", [], |r| r.get(0))
+            .unwrap();
+        let sync: i64 = conn
+            .query_row("PRAGMA synchronous", [], |r| r.get(0))
+            .unwrap();
+        let fk: i64 = conn
+            .query_row("PRAGMA foreign_keys", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(mode, "wal");
+        assert_eq!(sync, 1, "NORMAL");
+        assert_eq!(fk, 1);
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

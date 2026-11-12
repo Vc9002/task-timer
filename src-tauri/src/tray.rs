@@ -245,8 +245,10 @@ pub fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let handle = app.clone();
     thread::spawn(move || loop {
         thread::sleep(Duration::from_secs(60));
-        if refresh(&handle).is_err() {
-            break;
+        // A transient failure (e.g. a menu update racing shutdown) must not stop
+        // the elapsed-time label from ever updating again.
+        if let Err(error) = refresh(&handle) {
+            eprintln!("Tray refresh: {error}");
         }
     });
     Ok(())
