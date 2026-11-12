@@ -57,7 +57,7 @@
               <div>
                 <strong>{task.title}</strong>
                 <span class="meta">
-                  {#if task.overdue}Overdue{:else if task.due_at}Due {new Date(task.due_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}{:else if task.scheduled_date === new Date().toISOString().slice(0, 10)}Scheduled today{/if}
+                  {#if task.overdue}Overdue{:else if task.due_at}Due {new Date(task.due_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}{:else if task.scheduled_date === localDate()}Scheduled today{/if}
                   {#if task.remaining_minutes !== null}· {task.remaining_minutes}m remaining{/if}
                 </span>
               </div>
