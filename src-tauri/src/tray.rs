@@ -21,8 +21,43 @@ pub struct QuickCaptureState {
 /// this window after showing.
 const BLUR_GRACE_PERIOD: Duration = Duration::from_millis(400);
 
+/// The quick-capture popover dismisses itself when the user clicks away.
+///
+/// A blur event alone is not proof of that. On Windows the window also reports
+/// losing focus when focus moves into its own webview, and when the window is
+/// created on first use that happens whenever the page finishes loading, long
+/// after any fixed grace period. So on Windows the popover is hidden only if,
+/// a moment later, some other window really is in the foreground.
+pub fn on_quick_capture_blur(window: &tauri::Window) {
+    #[cfg(target_os = "windows")]
+    {
+        let window = window.clone();
+        thread::spawn(move || {
+            thread::sleep(Duration::from_millis(150));
+            if !is_foreground_window(&window) {
+                let _ = window.hide();
+            }
+        });
+    }
+    #[cfg(not(target_os = "windows"))]
+    if !quick_capture_blur_is_spurious(window.app_handle()) {
+        let _ = window.hide();
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn is_foreground_window(window: &tauri::Window) -> bool {
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+    let Ok(hwnd) = window.hwnd() else {
+        return false;
+    };
+    let foreground = unsafe { GetForegroundWindow() };
+    foreground as isize == hwnd.0 as isize
+}
+
 /// Whether a `Focused(false)` event on the quick-capture window this soon
 /// after showing it should be ignored as spurious.
+#[cfg_attr(target_os = "windows", allow(dead_code))]
 pub fn quick_capture_blur_is_spurious(app: &AppHandle) -> bool {
     app.try_state::<QuickCaptureState>()
         .map(|state| {

@@ -116,9 +116,8 @@ pub fn run() {
             }
             if window.label() == "quick-capture"
                 && matches!(event, tauri::WindowEvent::Focused(false))
-                && !tray::quick_capture_blur_is_spurious(window.app_handle())
             {
-                let _ = window.hide();
+                tray::on_quick_capture_blur(window);
             }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 let hide = window

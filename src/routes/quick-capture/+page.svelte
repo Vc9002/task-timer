@@ -22,9 +22,19 @@
     const onKeydown = (event: KeyboardEvent) => {
       if (event.key === "Escape") void invoke("hide_quick_capture");
     };
+    // The window is created on first use, so this page can mount before the
+    // window is shown and focused, and miss the "shown" event. Focus the box
+    // when the window gains focus, and keep trying briefly after mount, so
+    // typing works immediately on the very first open too.
+    const focusInput = () => { if (document.activeElement !== input) input?.focus(); };
+    const onWindowFocus = () => focusInput();
+    window.addEventListener("focus", onWindowFocus);
+    const retries = [50, 150, 400, 900].map(ms => setTimeout(focusInput, ms));
     window.addEventListener("keydown", onKeydown);
     return () => {
       void unlisten.then(u => u());
+      window.removeEventListener("focus", onWindowFocus);
+      retries.forEach(clearTimeout);
       window.removeEventListener("keydown", onKeydown);
     };
   });
