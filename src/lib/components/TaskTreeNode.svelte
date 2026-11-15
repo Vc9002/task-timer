@@ -31,6 +31,8 @@
   // Close the actions menu on an outside click or Escape. Listeners exist only while it is open.
   $effect(() => {
     if (!menuOpen) return;
+    // Rows near the bottom would otherwise open their menu below the visible area.
+    menu?.querySelector(".actions")?.scrollIntoView({ block: "nearest" });
     const close = () => { if (menu) menu.open = false; };
     const onPointer = (event: PointerEvent) => { if (menu && !menu.contains(event.target as Node)) close(); };
     const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") { close(); menu?.querySelector("summary")?.focus(); } };
@@ -61,7 +63,10 @@
         toastStore.show({
           message: `Completed “${task.title}”`,
           actionLabel: "Undo",
-          action: async () => { await setTaskStatus(id, previous); await onchanged(); },
+          action: async () => {
+            try { await setTaskStatus(id, previous); await onchanged(); }
+            catch { toastStore.show({ message: "Couldn't undo. Reopen the task from its class page." }); }
+          },
         });
       }
     }
