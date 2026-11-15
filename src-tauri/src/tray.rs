@@ -8,7 +8,7 @@ use std::{
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::TrayIconBuilder,
-    AppHandle, Emitter, Manager,
+    AppHandle, Emitter, Manager, WebviewWindow, WebviewWindowBuilder,
 };
 
 pub struct QuickCaptureState {
@@ -33,6 +33,60 @@ pub fn quick_capture_blur_is_spurious(app: &AppHandle) -> bool {
                 .unwrap_or(false)
         })
         .unwrap_or(false)
+}
+
+/// Serializes first-use window creation so two quick triggers build one window.
+static WINDOW_CREATION: Mutex<()> = Mutex::new(());
+
+/// Runs `then` with the window `label`, creating it from its `tauri.conf.json`
+/// entry on first use.
+///
+/// The quick-capture and mini-timer windows are declared with `"create": false`
+/// so an idle app does not carry two extra hidden webviews. Creation happens on
+/// its own thread: building a window from a synchronous command or an event
+/// handler deadlocks on Windows (see `WebviewWindowBuilder::build`).
+fn with_lazy_window(
+    app: &AppHandle,
+    label: &'static str,
+    then: impl FnOnce(&AppHandle, WebviewWindow) + Send + 'static,
+) {
+    if let Some(window) = app.get_webview_window(label) {
+        then(app, window);
+        return;
+    }
+    let app = app.clone();
+    thread::spawn(move || {
+        let window = {
+            let _creating = WINDOW_CREATION.lock().unwrap_or_else(|e| e.into_inner());
+            match app.get_webview_window(label) {
+                Some(window) => Ok(window),
+                None => create_window(&app, label),
+            }
+        };
+        match window {
+            Ok(window) => then(&app, window),
+            Err(error) => {
+                eprintln!("Couldn't open the {label} window: {error}");
+                let _ = app.emit(
+                    "desktop-error",
+                    "TaskTimer couldn't open that window. Try again.",
+                );
+            }
+        }
+    });
+}
+
+fn create_window(app: &AppHandle, label: &str) -> Result<WebviewWindow, String> {
+    let config = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|window| window.label == label)
+        .ok_or_else(|| format!("no window named {label} in the app config"))?;
+    WebviewWindowBuilder::from_config(app, config)
+        .and_then(|builder| builder.build())
+        .map_err(|e| e.to_string())
 }
 
 pub struct TrayState {
@@ -67,7 +121,9 @@ pub fn show(app: &AppHandle) {
 /// Shows the small always-on-top quick-capture popover without touching the
 /// main window, so adding a task doesn't interrupt whatever you're doing.
 pub fn show_quick_capture(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window("quick-capture") {
+    with_lazy_window(app, "quick-capture", |app, window| {
+        // Stamp the time here, after any first-use creation, so the blur grace
+        // period starts when the window is actually shown.
         if let Some(state) = app.try_state::<QuickCaptureState>() {
             if let Ok(mut shown_at) = state.shown_at.lock() {
                 *shown_at = Instant::now();
@@ -77,7 +133,7 @@ pub fn show_quick_capture(app: &AppHandle) {
         let _ = window.show();
         let _ = window.set_focus();
         let _ = app.emit("quick-capture-shown", ());
-    }
+    });
 }
 
 #[tauri::command]
@@ -90,7 +146,12 @@ pub fn hide_quick_capture(app: AppHandle) {
 #[tauri::command]
 pub fn toggle_mini_timer(app: AppHandle) -> Result<bool, String> {
     let Some(window) = app.get_webview_window("mini-timer") else {
-        return Err("Mini timer window unavailable".into());
+        // First use: create it, then show it.
+        with_lazy_window(&app, "mini-timer", |_, window| {
+            let _ = window.show();
+            let _ = window.set_focus();
+        });
+        return Ok(true);
     };
     let visible = window.is_visible().map_err(|e| e.to_string())?;
     if visible {

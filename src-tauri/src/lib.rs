@@ -51,6 +51,16 @@ use timer::{
     pause_timer, recover_timer, resume_timer, start_class_timer, start_timer, switch_timer,
 };
 
+/// Debug builds only: `TASKTIMER_DATA_DIR` points the app at a scratch database
+/// so development and testing never touch real data. Release builds ignore it.
+fn dev_data_dir_override() -> Option<std::path::PathBuf> {
+    if cfg!(debug_assertions) {
+        std::env::var_os("TASKTIMER_DATA_DIR").map(std::path::PathBuf::from)
+    } else {
+        None
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let autostart = tauri_plugin_autostart::Builder::new().arg("--autostart");
@@ -67,10 +77,11 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .setup(|app| {
-            let app_data_dir = app
-                .path()
-                .app_data_dir()
-                .expect("failed to resolve app data dir");
+            let app_data_dir = dev_data_dir_override().unwrap_or_else(|| {
+                app.path()
+                    .app_data_dir()
+                    .expect("failed to resolve app data dir")
+            });
             let conn = db::open(&app_data_dir).expect("failed to open database");
             app.manage(Db(Mutex::new(conn)));
             if let Err(error) = todoist::sync::recover_inflight_outbox(&app.state::<Db>()) {

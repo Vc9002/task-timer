@@ -22,6 +22,7 @@
       },
       {
         "label": "quick-capture",
+        "create": false,
         "url": "/quick-capture",
         "title": "Quick Add",
         "width": 460,
@@ -37,6 +38,7 @@
       },
       {
         "label": "mini-timer",
+        "create": false,
         "url": "/mini-timer",
         "title": "TaskTimer — Mini",
         "width": 300,
