@@ -180,7 +180,12 @@ pub(crate) fn today_for(
     }
     // This header is actual time tracked today, including completed/archived work.
     // Every session counts once, regardless of hierarchy or current task visibility.
-    let tracked_seconds_total = conn.query_row("SELECT COALESCE(SUM(final_duration_seconds),0) FROM time_sessions WHERE end_ts IS NOT NULL AND date(start_ts,'localtime')=?1",[date],|r|r.get(0))?;
+    let on_date = crate::commands::analytics::local_day_range("start_ts", "date(?1)", "date(?1)");
+    let tracked_seconds_total = conn.query_row(
+        &format!("SELECT COALESCE(SUM(final_duration_seconds),0) FROM time_sessions WHERE end_ts IS NOT NULL AND {on_date}"),
+        [date],
+        |r| r.get(0),
+    )?;
     let mut groups: Vec<_> = groups.into_values().collect();
     groups.sort_by(|a, b| a.course_code.cmp(&b.course_code));
 
