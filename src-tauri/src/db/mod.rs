@@ -56,6 +56,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "0014_task_dependencies",
         include_str!("migrations/0014_task_dependencies.sql"),
     ),
+    (
+        "0015_session_last_resumed",
+        include_str!("migrations/0015_session_last_resumed.sql"),
+    ),
 ];
 
 pub fn open(app_data_dir: &Path) -> rusqlite::Result<Connection> {
@@ -278,5 +282,28 @@ mod tests {
         assert_eq!(fk, 1);
         drop(conn);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn last_resumed_upgrade_preserves_sessions() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "PRAGMA foreign_keys=ON; CREATE TABLE schema_migrations(name TEXT PRIMARY KEY);",
+        )
+        .unwrap();
+        for (name, sql) in &MIGRATIONS[..14] {
+            apply_migration(&conn, name, sql).unwrap();
+        }
+        conn.execute_batch("INSERT INTO classes(id,course_code,semester) VALUES(1,'LGST','Fall'); INSERT INTO tasks(id,class_id,title) VALUES(1,1,'Read'); INSERT INTO time_sessions(id,task_id,start_ts,accumulated_pause_seconds) VALUES(1,1,'2026-09-15 10:00:00',120);").unwrap();
+        run_migrations(&conn).unwrap();
+        let (pause, resumed): (i64, Option<String>) = conn
+            .query_row(
+                "SELECT accumulated_pause_seconds, last_resumed_ts FROM time_sessions WHERE id=1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(pause, 120);
+        assert_eq!(resumed, None);
     }
 }

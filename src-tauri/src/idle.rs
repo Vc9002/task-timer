@@ -85,39 +85,68 @@ fn system_idle_seconds() -> Option<f64> {
     None
 }
 
-fn check(app: &AppHandle) -> Result<(), String> {
+/// How long the user has been away, in seconds, given the OS idle time and the
+/// wall-clock gap since the previous poll.
+///
+/// A gap far longer than the poll interval means the machine was asleep. The
+/// OS idle counter is useless then, because the keypress that woke the machine
+/// resets it, so the whole gap counts as time away.
+fn away_seconds(idle_seconds: Option<f64>, since_last_poll: Duration) -> f64 {
+    let asleep = if since_last_poll > POLL_INTERVAL * 3 {
+        since_last_poll.as_secs_f64()
+    } else {
+        0.0
+    };
+    idle_seconds.unwrap_or(0.0).max(asleep)
+}
+
+fn check(app: &AppHandle, since_last_poll: Duration) -> Result<(), String> {
     let db = app.state::<Db>();
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
-    let threshold = threshold_minutes(&conn);
-    if threshold == 0 {
-        return Ok(());
-    }
-    let Some(active) = timer::core_get_active_session(&conn).map_err(|e| format!("{e:?}"))? else {
-        return Ok(());
+    let (threshold, session_id) = {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        let threshold = threshold_minutes(&conn);
+        if threshold == 0 {
+            return Ok(());
+        }
+        let Some(active) = timer::core_get_active_session(&conn).map_err(|e| format!("{e:?}"))?
+        else {
+            return Ok(());
+        };
+        if active.is_paused {
+            return Ok(());
+        }
+        (threshold, active.session.id)
     };
-    if active.is_paused {
+    let away = away_seconds(system_idle_seconds(), since_last_poll);
+    if away < (threshold * 60) as f64 {
         return Ok(());
     }
-    drop(conn);
-    let Some(idle_seconds) = system_idle_seconds() else {
-        return Ok(());
+    // Pause as of when the user left, not as of now, so the time away is not
+    // counted as work. The update is a no-op if the session changed meanwhile.
+    let paused = {
+        let conn = db.0.lock().map_err(|e| e.to_string())?;
+        timer::core_pause_timer_backdated(&conn, session_id, away as i64)
+            .map_err(|e| e.to_string())?
     };
-    if idle_seconds < (threshold * 60) as f64 {
-        return Ok(());
+    if paused {
+        crate::tray::changed(app);
     }
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
-    timer::core_pause_timer(&conn).map_err(|e| format!("{e:?}"))?;
-    drop(conn);
-    crate::tray::changed(app);
     Ok(())
 }
 
 pub fn setup(app: &AppHandle) {
     let app = app.clone();
-    std::thread::spawn(move || loop {
-        std::thread::sleep(POLL_INTERVAL);
-        if let Err(error) = check(&app) {
-            eprintln!("Idle check: {error}");
+    std::thread::spawn(move || {
+        // Wall-clock time, not Instant: Instant may not advance while the machine sleeps.
+        let mut last_poll = std::time::SystemTime::now();
+        loop {
+            std::thread::sleep(POLL_INTERVAL);
+            let now = std::time::SystemTime::now();
+            let since_last_poll = now.duration_since(last_poll).unwrap_or_default();
+            last_poll = now;
+            if let Err(error) = check(&app, since_last_poll) {
+                eprintln!("Idle check: {error}");
+            }
         }
     });
 }
@@ -149,5 +178,24 @@ mod tests {
     #[test]
     fn windows_tick_rollover_preserves_idle_duration() {
         assert_eq!(windows_idle_seconds(1000, u32::MAX - 999), 2.0);
+    }
+
+    #[test]
+    fn away_time_is_the_idle_time_during_normal_polling() {
+        assert_eq!(away_seconds(Some(400.0), POLL_INTERVAL), 400.0);
+        assert_eq!(away_seconds(None, POLL_INTERVAL), 0.0);
+    }
+
+    #[test]
+    fn a_long_gap_between_polls_counts_as_sleep_even_with_fresh_input() {
+        // Woke from a two-hour sleep by pressing a key, so the OS reports 1s idle.
+        let gap = Duration::from_secs(7200);
+        assert_eq!(away_seconds(Some(1.0), gap), 7200.0);
+        assert_eq!(away_seconds(None, gap), 7200.0);
+        // A slightly late poll is not sleep.
+        assert_eq!(
+            away_seconds(Some(1.0), POLL_INTERVAL + Duration::from_secs(5)),
+            1.0
+        );
     }
 }

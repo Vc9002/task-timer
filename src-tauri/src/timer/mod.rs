@@ -213,6 +213,25 @@ pub fn core_pause_timer(conn: &Connection) -> Result<ActiveSessionInfo, TimerErr
     build_active_info(conn, refreshed).map_err(TimerError::from)
 }
 
+/// Pauses `session_id` as of `away_seconds` ago: the user stopped working then,
+/// and it was only noticed now. The pause never starts before the session did
+/// or before it was last resumed, since that time is already accounted for.
+/// Does nothing (returns false) if the session is no longer running, which can
+/// happen because the caller checked it under an earlier lock.
+pub fn core_pause_timer_backdated(
+    conn: &Connection,
+    session_id: i64,
+    away_seconds: i64,
+) -> rusqlite::Result<bool> {
+    let changed = conn.execute(
+        "UPDATE time_sessions
+         SET pause_started_ts = MAX(datetime('now', ?2), COALESCE(last_resumed_ts, start_ts))
+         WHERE id = ?1 AND pause_started_ts IS NULL AND end_ts IS NULL",
+        rusqlite::params![session_id, format!("-{} seconds", away_seconds.max(0))],
+    )?;
+    Ok(changed > 0)
+}
+
 pub fn core_resume_timer(conn: &Connection) -> Result<ActiveSessionInfo, TimerError> {
     let session = find_active_session(conn)?.ok_or(TimerError::NotFound)?;
     if let Some(pause_started) = &session.pause_started_ts {
@@ -223,7 +242,7 @@ pub fn core_resume_timer(conn: &Connection) -> Result<ActiveSessionInfo, TimerEr
         )?;
         conn.execute(
             "UPDATE time_sessions SET accumulated_pause_seconds = accumulated_pause_seconds + ?1,
-             pause_started_ts = NULL WHERE id = ?2",
+             pause_started_ts = NULL, last_resumed_ts = datetime('now') WHERE id = ?2",
             rusqlite::params![pause_elapsed, session.id],
         )?;
     }
@@ -714,5 +733,123 @@ mod tests {
         let id = seed_task(&conn);
         let active = core_start_timer(&conn, id).unwrap();
         assert!(core_edit_session_duration(&conn, active.session.id, 60).is_err());
+    }
+
+    /// Moves a running session's start back, as if it began `seconds` ago.
+    fn started_ago(conn: &Connection, id: i64, seconds: i64) {
+        conn.execute(
+            "UPDATE time_sessions SET start_ts = datetime('now', ?2) WHERE id = ?1",
+            rusqlite::params![id, format!("-{seconds} seconds")],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn backdated_pause_removes_the_idle_time() {
+        let conn = test_conn();
+        let id = core_start_timer(&conn, seed_task(&conn))
+            .unwrap()
+            .session
+            .id;
+        started_ago(&conn, id, 3600);
+        // Worked 40 minutes, then idle for 20 before it was noticed.
+        assert!(core_pause_timer_backdated(&conn, id, 1200).unwrap());
+        let active = core_get_active_session(&conn).unwrap().unwrap();
+        assert!(active.is_paused);
+        assert!(
+            (2399..=2401).contains(&active.elapsed_seconds),
+            "{}",
+            active.elapsed_seconds
+        );
+        let finished = core_finish_timer(&conn).unwrap();
+        let duration = finished.final_duration_seconds.unwrap();
+        assert!((2399..=2401).contains(&duration), "{duration}");
+    }
+
+    #[test]
+    fn backdated_pause_never_starts_before_the_session() {
+        let conn = test_conn();
+        let id = core_start_timer(&conn, seed_task(&conn))
+            .unwrap()
+            .session
+            .id;
+        started_ago(&conn, id, 600);
+        // Idle "for an hour" but the session is ten minutes old: zero work, not negative.
+        assert!(core_pause_timer_backdated(&conn, id, 3600).unwrap());
+        let active = core_get_active_session(&conn).unwrap().unwrap();
+        assert!(active.elapsed_seconds <= 1, "{}", active.elapsed_seconds);
+        assert_eq!(
+            active.session.pause_started_ts.as_deref(),
+            Some(active.session.start_ts.as_str())
+        );
+    }
+
+    #[test]
+    fn backdated_pause_never_starts_before_the_last_resume() {
+        let conn = test_conn();
+        let id = core_start_timer(&conn, seed_task(&conn))
+            .unwrap()
+            .session
+            .id;
+        started_ago(&conn, id, 3600);
+        // Paused for the first 50 minutes, then resumed (e.g. by a Pomodoro break
+        // ending with nobody at the keyboard) 10 minutes ago.
+        conn.execute(
+            "UPDATE time_sessions SET accumulated_pause_seconds = 3000,
+             last_resumed_ts = datetime('now','-600 seconds') WHERE id = ?1",
+            [id],
+        )
+        .unwrap();
+        // Input was last seen 30 minutes ago, during that earlier pause.
+        assert!(core_pause_timer_backdated(&conn, id, 1800).unwrap());
+        let active = core_get_active_session(&conn).unwrap().unwrap();
+        // The earlier pause is not subtracted twice: nothing was worked, not less than nothing.
+        assert!(active.elapsed_seconds <= 1, "{}", active.elapsed_seconds);
+        let finished = core_finish_timer(&conn).unwrap();
+        assert!(finished.final_duration_seconds.unwrap() <= 1);
+    }
+
+    #[test]
+    fn backdated_pause_leaves_paused_or_finished_sessions_alone() {
+        let conn = test_conn();
+        let id = core_start_timer(&conn, seed_task(&conn))
+            .unwrap()
+            .session
+            .id;
+        started_ago(&conn, id, 3600);
+        core_pause_timer(&conn).unwrap();
+        let before = core_get_active_session(&conn)
+            .unwrap()
+            .unwrap()
+            .session
+            .pause_started_ts;
+        assert!(!core_pause_timer_backdated(&conn, id, 1200).unwrap());
+        let after = core_get_active_session(&conn)
+            .unwrap()
+            .unwrap()
+            .session
+            .pause_started_ts;
+        assert_eq!(before, after);
+        core_finish_timer(&conn).unwrap();
+        assert!(!core_pause_timer_backdated(&conn, id, 1200).unwrap());
+    }
+
+    #[test]
+    fn resume_records_when_it_happened() {
+        let conn = test_conn();
+        let id = core_start_timer(&conn, seed_task(&conn))
+            .unwrap()
+            .session
+            .id;
+        core_pause_timer(&conn).unwrap();
+        core_resume_timer(&conn).unwrap();
+        let resumed: Option<String> = conn
+            .query_row(
+                "SELECT last_resumed_ts FROM time_sessions WHERE id=?1",
+                [id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(resumed.is_some());
     }
 }
