@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isLongBreak, nextPhase, parsePersisted, phaseMinutes, secondsRemaining, trayLabel } from "./pomodoro-machine";
+import { isLongBreak, parsePersisted, phaseMinutes, secondsRemaining, trayLabel } from "./pomodoro-machine";
 
 const settings = { work_minutes: 25, break_minutes: 5, long_break_minutes: 15 };
 
@@ -22,9 +22,7 @@ describe("pomodoro-machine", () => {
     expect(secondsRemaining(5_000, 10_000)).toBe(0);
   });
 
-  it("alternates phases and labels them", () => {
-    expect(nextPhase("work")).toBe("break");
-    expect(nextPhase("break")).toBe("work");
+  it("labels phases for the tray", () => {
     expect(trayLabel("work", false)).toBe("Focus");
     expect(trayLabel("break", true)).toBe("Long break");
     expect(trayLabel("break", false)).toBe("Break");

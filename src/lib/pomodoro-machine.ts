@@ -28,10 +28,6 @@ export function secondsRemaining(deadlineMs: number, nowMs: number): number {
   return Math.max(0, Math.ceil((deadlineMs - nowMs) / 1000));
 }
 
-export function nextPhase(phase: ActivePhase): ActivePhase {
-  return phase === "work" ? "break" : "work";
-}
-
 export function trayLabel(phase: ActivePhase, longBreak: boolean): string {
   return phase === "work" ? "Focus" : longBreak ? "Long break" : "Break";
 }

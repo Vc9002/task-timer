@@ -430,4 +430,22 @@ mod tests {
         assert_eq!(week.unscheduled[0].unplanned_minutes, 30);
         assert_eq!(week.unscheduled[0].schedule_coverage_percent, 66);
     }
+
+    #[test]
+    fn parent_path_includes_open_and_completed_ancestors() {
+        let c = db();
+        c.execute_batch(
+            "INSERT INTO tasks(id,class_id,title,status) VALUES(1,1,'Course project','completed');
+             INSERT INTO tasks(id,class_id,title,parent_task_id) VALUES(2,1,'Draft',1);
+             INSERT INTO tasks(id,class_id,title,parent_task_id,scheduled_date) VALUES(3,1,'Intro',2,'2026-09-15');",
+        )
+        .unwrap();
+        let week = week_for(&c, "2026-09-14").unwrap();
+        let task = &week.days[1].tasks[0];
+        assert_eq!(task.id, 3);
+        // The completed grandparent is not in the open-task scan but still belongs in the path.
+        assert_eq!(task.parent_path.as_deref(), Some("Course project › Draft"));
+        // The open parent is context for a scheduled task, so it is not listed as unscheduled.
+        assert!(week.unscheduled.is_empty());
+    }
 }

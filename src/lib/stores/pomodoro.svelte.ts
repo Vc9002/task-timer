@@ -2,7 +2,7 @@ import { getPomodoroSettings, notifyPomodoroPhase, setTrayPomodoroStatus, type P
 import { timerStore } from "$lib/stores/timer.svelte";
 import { formatHms } from "$lib/format";
 import {
-  STORAGE_KEY, isLongBreak, nextPhase, parsePersisted, phaseMinutes, secondsRemaining, trayLabel,
+  STORAGE_KEY, isLongBreak, parsePersisted, phaseMinutes, secondsRemaining, trayLabel,
   type ActivePhase, type Phase, type PersistedState,
 } from "$lib/pomodoro-machine";
 
@@ -95,10 +95,10 @@ class PomodoroStore {
           const id = timerStore.active.session.id;
           if (await this.pauseSession(id)) this.pausedSessionId = id;
         }
-        this.beginPhase(nextPhase("work"));
+        this.beginPhase("break");
       } else if (this.phase === "break") {
         if (!await this.releaseOwnedPause()) return;
-        this.beginPhase(nextPhase("break"));
+        this.beginPhase("work");
         void notifyPomodoroPhase("break_done");
       }
       this.pushTrayStatus();
