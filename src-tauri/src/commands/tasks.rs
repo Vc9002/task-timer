@@ -94,6 +94,26 @@ pub(crate) const ELIGIBLE_TASK_CLAUSE: &str = "t.class_id IN (SELECT id FROM cla
     (t.source='local' OR (t.external_state='active' AND EXISTS
         (SELECT 1 FROM todoist_projects p WHERE p.todoist_id=t.todoist_project_id AND p.class_id=t.class_id)))";
 
+/// Loads full task rows (with their per-row aggregates) for just these ids, in
+/// id order. Views first decide which tasks they show from a cheap scan, then
+/// pay for the aggregate subqueries only on those.
+pub(crate) fn tasks_by_ids(
+    conn: &rusqlite::Connection,
+    ids: &[i64],
+) -> rusqlite::Result<Vec<Task>> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let json = serde_json::to_string(ids).unwrap_or_else(|_| "[]".into());
+    let result = conn
+        .prepare(&format!(
+            "{TASK_SELECT} WHERE t.id IN (SELECT value FROM json_each(?1)) ORDER BY t.id"
+        ))?
+        .query_map([json], row_to_task)?
+        .collect();
+    result
+}
+
 pub(crate) fn row_to_task(row: &rusqlite::Row) -> rusqlite::Result<Task> {
     let estimated_minutes: Option<i64> = row.get("estimated_minutes")?;
     let tracked_seconds_direct: i64 = row.get("tracked_seconds_direct")?;

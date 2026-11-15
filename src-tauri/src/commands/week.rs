@@ -1,4 +1,4 @@
-use super::tasks::{row_to_task, Task, ELIGIBLE_TASK_CLAUSE, TASK_SELECT};
+use super::tasks::{tasks_by_ids, Task, ELIGIBLE_TASK_CLAUSE};
 use crate::commands::planning::StudyBlock;
 use crate::db::Db;
 use chrono::{Duration, NaiveDate};
@@ -6,7 +6,7 @@ use rusqlite::Connection;
 use serde::Serialize;
 use tauri::State;
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct WeekTask {
     pub id: i64,
     pub class_id: i64,
@@ -49,11 +49,19 @@ pub struct WeekSummary {
     pub tracked_seconds: i64,
 }
 
+/// The hierarchy fields of an open, eligible task, from the cheap first scan.
+struct Outline {
+    parent: Option<i64>,
+    title: String,
+    scheduled_date: Option<String>,
+    due_at: Option<String>,
+}
+
 fn to_week_task(
     conn: &Connection,
     task: Task,
-    _today: &str,
     context_only: bool,
+    outline: &std::collections::HashMap<i64, Outline>,
     class_codes: &std::collections::HashMap<i64, String>,
     overdue_map: &std::collections::HashMap<String, bool>,
 ) -> rusqlite::Result<WeekTask> {
@@ -68,11 +76,16 @@ fn to_week_task(
     let mut path = Vec::new();
     let mut parent = task.parent_task_id;
     while let Some(pid) = parent {
-        let (title, next): (String, Option<i64>) = conn.query_row(
-            "SELECT title,parent_task_id FROM tasks WHERE id=?1",
-            [pid],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )?;
+        // Open ancestors are already in memory. A completed or otherwise
+        // filtered-out ancestor still belongs in the path, so look it up.
+        let (title, next): (String, Option<i64>) = match outline.get(&pid) {
+            Some(node) => (node.title.clone(), node.parent),
+            None => conn.query_row(
+                "SELECT title,parent_task_id FROM tasks WHERE id=?1",
+                [pid],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )?,
+        };
         path.push(title);
         parent = next;
     }
@@ -96,10 +109,6 @@ fn to_week_task(
         unplanned_minutes: task.unplanned_minutes,
         schedule_coverage_percent: task.schedule_coverage_percent,
     })
-}
-
-fn eligible_clause() -> &'static str {
-    ELIGIBLE_TASK_CLAUSE
 }
 
 fn capacity_for(conn: &Connection, date: &str, weekday: u32) -> rusqlite::Result<Option<i64>> {
@@ -131,36 +140,61 @@ pub(crate) fn week_for(conn: &Connection, start_date: &str) -> rusqlite::Result<
     let end = start + Duration::days(6);
     let today = chrono::Local::now().date_naive().to_string();
 
-    let eligible = eligible_clause();
-    let study_blocks =
-        crate::commands::planning::blocks_for_range(conn, &start.to_string(), &end.to_string())?;
-    let tasks: Vec<Task> = conn
+    let eligible = ELIGIBLE_TASK_CLAUSE;
+    let (start_s, end_s) = (start.to_string(), end.to_string());
+    let lookahead = (end + Duration::days(7)).to_string();
+    let study_blocks = crate::commands::planning::blocks_for_range(conn, &start_s, &end_s)?;
+    // Cheap scan of every open task first; full rows are loaded only for shown tasks.
+    let outline: std::collections::HashMap<i64, Outline> = conn
         .prepare(&format!(
-            "{TASK_SELECT} WHERE {eligible} AND t.status != 'completed' ORDER BY t.id"
+            "SELECT t.id, t.parent_task_id, t.title, t.scheduled_date, t.due_at FROM tasks t
+             WHERE {eligible} AND t.status != 'completed'"
         ))?
-        .query_map([], row_to_task)?
+        .query_map([], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                Outline {
+                    parent: r.get(1)?,
+                    title: r.get(2)?,
+                    scheduled_date: r.get(3)?,
+                    due_at: r.get(4)?,
+                },
+            ))
+        })?
         .collect::<Result<_, _>>()?;
-
-    let by_id: std::collections::HashMap<i64, Task> =
-        tasks.iter().cloned().map(|t| (t.id, t)).collect();
+    let in_week = |date: &str| date >= start_s.as_str() && date <= end_s.as_str();
+    // Tasks scheduled this week, plus their ancestors (shown only as context).
     let mut selected = std::collections::HashSet::new();
-    for task in &tasks {
-        if task
-            .scheduled_date
-            .as_deref()
-            .is_some_and(|d| d >= start.to_string().as_str() && d <= end.to_string().as_str())
-        {
-            selected.insert(task.id);
-            let mut parent = task.parent_task_id;
+    for (id, node) in &outline {
+        if node.scheduled_date.as_deref().is_some_and(in_week) {
+            selected.insert(*id);
+            let mut parent = node.parent;
             while let Some(pid) = parent {
-                let Some(parent_task) = by_id.get(&pid) else {
+                let Some(parent_node) = outline.get(&pid) else {
                     break;
                 };
                 selected.insert(pid);
-                parent = parent_task.parent_task_id;
+                parent = parent_node.parent;
             }
         }
     }
+    // Shown: scheduled this week, or unscheduled and due within the lookahead.
+    let mut shown: Vec<i64> = outline
+        .iter()
+        .filter(|(id, node)| match node.scheduled_date.as_deref() {
+            Some(date) => in_week(date),
+            None => {
+                !selected.contains(*id)
+                    && node
+                        .due_at
+                        .as_deref()
+                        .is_some_and(|d| &d[..10.min(d.len())] <= lookahead.as_str())
+            }
+        })
+        .map(|(id, _)| *id)
+        .collect();
+    shown.sort_unstable();
+    let tasks: Vec<Task> = tasks_by_ids(conn, &shown)?;
     // Prefetch class codes and overdue status once instead of per task (avoids N+1 round-trips).
     let class_codes: std::collections::HashMap<i64, String> = conn
         .prepare("SELECT id, course_code FROM classes")?
@@ -178,34 +212,10 @@ pub(crate) fn week_for(conn: &Connection, start_date: &str) -> rusqlite::Result<
     let mut unscheduled = Vec::new();
 
     for task in tasks {
-        if task.scheduled_date.is_some() && !selected.contains(&task.id) {
+        let week_task = to_week_task(conn, task, false, &outline, &class_codes, &overdue_map)?;
+        if week_task.scheduled_date.is_none() {
+            unscheduled.push(week_task);
             continue;
-        }
-        let context_only = selected.contains(&task.id) && task.scheduled_date.as_deref().is_none();
-        let week_task = to_week_task(conn, task, &today, context_only, &class_codes, &overdue_map)?;
-        match &week_task.scheduled_date {
-            Some(date)
-                if date.as_str() >= start.to_string().as_str()
-                    && date.as_str() <= end.to_string().as_str() => {}
-            Some(_) => continue,
-            None => {
-                if week_task.context_only {
-                    continue;
-                }
-                let lookahead = end + Duration::days(7);
-                let in_range = week_task
-                    .due_at
-                    .as_ref()
-                    .map(|d| {
-                        let d = &d[..10.min(d.len())];
-                        d <= lookahead.to_string().as_str()
-                    })
-                    .unwrap_or(false);
-                if in_range {
-                    unscheduled.push(week_task);
-                }
-                continue;
-            }
         }
         if !week_task.context_only {
             if let Some(minutes) = week_task.remaining_minutes {
@@ -226,25 +236,7 @@ pub(crate) fn week_for(conn: &Connection, start_date: &str) -> rusqlite::Result<
         let day_tasks: Vec<WeekTask> = days
             .iter()
             .filter(|t| t.scheduled_date.as_deref() == Some(date_str.as_str()))
-            .map(|t| WeekTask {
-                id: t.id,
-                class_id: t.class_id,
-                course_code: t.course_code.clone(),
-                title: t.title.clone(),
-                status: t.status.clone(),
-                due_at: t.due_at.clone(),
-                scheduled_date: t.scheduled_date.clone(),
-                estimated_minutes: t.estimated_minutes,
-                tracked_seconds_direct: t.tracked_seconds_direct,
-                tracked_seconds_total: t.tracked_seconds_total,
-                remaining_minutes: t.remaining_minutes,
-                overdue: t.overdue,
-                context_only: t.context_only,
-                parent_path: t.parent_path.clone(),
-                scheduled_minutes_before_due: t.scheduled_minutes_before_due,
-                unplanned_minutes: t.unplanned_minutes,
-                schedule_coverage_percent: t.schedule_coverage_percent,
-            })
+            .cloned()
             .collect();
         let estimated_minutes_remaining =
             day_tasks.iter().filter_map(|t| t.remaining_minutes).sum();

@@ -1,4 +1,4 @@
-use super::tasks::{row_to_task, Task, ELIGIBLE_TASK_CLAUSE, TASK_SELECT};
+use super::tasks::{tasks_by_ids, Task, ELIGIBLE_TASK_CLAUSE};
 use crate::db::Db;
 use rusqlite::{params, Connection};
 use serde::Serialize;
@@ -87,15 +87,29 @@ pub(crate) fn today_for(
     include_overdue: bool,
 ) -> rusqlite::Result<TodaySummary> {
     let eligible = ELIGIBLE_TASK_CLAUSE;
-    let tasks: Vec<Task> = conn
-        .prepare(&format!("{TASK_SELECT} WHERE {eligible} ORDER BY t.id"))?
-        .query_map([], row_to_task)?
+    // Cheap scan of the hierarchy first; full rows are loaded only for shown tasks.
+    struct Node {
+        parent: Option<i64>,
+        completed: bool,
+    }
+    let nodes: HashMap<i64, Node> = conn
+        .prepare(&format!(
+            "SELECT t.id, t.parent_task_id, t.status='completed' FROM tasks t WHERE {eligible}"
+        ))?
+        .query_map([], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                Node {
+                    parent: r.get(1)?,
+                    completed: r.get(2)?,
+                },
+            ))
+        })?
         .collect::<Result<_, _>>()?;
-    let by_id: HashMap<i64, &Task> = tasks.iter().map(|t| (t.id, t)).collect();
     let mut children: HashMap<i64, Vec<i64>> = HashMap::new();
-    for task in &tasks {
-        if let Some(parent) = task.parent_task_id {
-            children.entry(parent).or_default().push(task.id);
+    for (id, node) in &nodes {
+        if let Some(parent) = node.parent {
+            children.entry(parent).or_default().push(*id);
         }
     }
     // Date-only due dates are floating local dates; timestamp deadlines use local time.
@@ -110,41 +124,35 @@ pub(crate) fn today_for(
             continue;
         }
         if let Some(ids) = children.get(&id) {
-            pending.extend(ids.iter().filter(|id| by_id[id].status != "completed"));
+            pending.extend(ids.iter().filter(|id| !nodes[id].completed));
         }
     }
     let mut included = actionable.clone();
     for id in &actionable {
-        let mut parent = by_id[id].parent_task_id;
+        let mut parent = nodes[id].parent;
         while let Some(pid) = parent {
-            let Some(task) = by_id.get(&pid) else {
+            let Some(node) = nodes.get(&pid) else {
                 break;
             };
             if !included.insert(pid) {
                 break;
             }
-            parent = task.parent_task_id;
+            parent = node.parent;
         }
     }
+    let mut included_ids: Vec<i64> = included.iter().copied().collect();
+    included_ids.sort_unstable();
+    let tasks: Vec<Task> = tasks_by_ids(conn, &included_ids)?;
     // Prefetch class codes and overdue status once instead of per task (avoids N+1 round-trips).
     let class_codes: HashMap<i64, String> = conn
         .prepare("SELECT id, course_code FROM classes")?
         .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
         .collect::<Result<_, _>>()?;
-    let overdue_map = overdue_map_for(
-        conn,
-        tasks
-            .iter()
-            .filter(|t| included.contains(&t.id))
-            .filter_map(|t| t.due_at.as_deref()),
-        date,
-    )?;
+    let overdue_map =
+        overdue_map_for(conn, tasks.iter().filter_map(|t| t.due_at.as_deref()), date)?;
     let mut groups: BTreeMap<i64, TodayClassGroup> = BTreeMap::new();
     let mut estimate = 0;
     for task in tasks {
-        if !included.contains(&task.id) {
-            continue;
-        }
         let context_only = !actionable.contains(&task.id);
         if !context_only {
             estimate += task.estimated_minutes.unwrap_or(0);
