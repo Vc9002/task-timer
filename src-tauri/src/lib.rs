@@ -91,7 +91,7 @@ pub fn run() {
                 shown_at: std::sync::Mutex::new(std::time::Instant::now()),
             });
             tray::setup(app.handle())?;
-            desktop::setup(app.handle())?;
+            let start_hidden = desktop::setup(app.handle())?;
             reminders::setup(app.handle());
             idle::setup(app.handle());
             weekly_review::setup(app.handle());
@@ -101,6 +101,12 @@ pub fn run() {
 
             // Todoist is intentionally opt-in at runtime. Avoid reading the OS
             // keychain during startup; users can sync explicitly from Settings.
+
+            // The main window is created last, and by hand ("create": false in
+            // tauri.conf.json). Windows built automatically exist before this
+            // hook runs, so their pages could call commands before the database
+            // and other state above were registered ("state not managed").
+            tray::create_main_window(app.handle(), !start_hidden)?;
 
             Ok(())
         })

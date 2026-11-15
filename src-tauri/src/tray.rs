@@ -7,7 +7,7 @@ use std::{
 };
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
-    tray::TrayIconBuilder,
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Emitter, Manager, WebviewWindow, WebviewWindowBuilder,
 };
 
@@ -74,6 +74,22 @@ fn with_lazy_window(
             }
         }
     });
+}
+
+/// Builds the main window from its config entry. Called at the end of setup,
+/// once every piece of state its page may ask for is registered.
+pub fn create_main_window(app: &AppHandle, visible: bool) -> Result<(), String> {
+    let config = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|window| window.label == "main")
+        .ok_or("no main window in the app config")?;
+    WebviewWindowBuilder::from_config(app, config)
+        .and_then(|builder| builder.visible(visible).build())
+        .map(|_| ())
+        .map_err(|e| e.to_string())
 }
 
 fn create_window(app: &AppHandle, label: &str) -> Result<WebviewWindow, String> {
@@ -227,19 +243,12 @@ fn refresh(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         let conn = db.0.lock().map_err(|_| "Timer unavailable")?;
         timer::core_get_active_session(&conn).map_err(|_| "Timer unavailable")?
     };
-    state.label.set_text(
-        active
-            .as_ref()
-            .map(|a| {
-                format!(
-                    "{} — {} · {}",
-                    a.class_course_code,
-                    a.task_title,
-                    elapsed_label(a.elapsed_seconds)
-                )
-            })
-            .unwrap_or_else(|| "No active timer".into()),
-    )?;
+    let status = status_line(active.as_ref());
+    state.label.set_text(&status)?;
+    if let Some(tray) = app.tray_by_id(TRAY_ID) {
+        // Hovering the icon answers "what am I tracking?" without opening anything.
+        tray.set_tooltip(Some(format!("TaskTimer\n{status}")))?;
+    }
     state
         .pause
         .set_text(if active.as_ref().is_some_and(|a| a.is_paused) {
@@ -250,6 +259,21 @@ fn refresh(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     state.pause.set_enabled(active.is_some())?;
     state.finish.set_enabled(active.is_some())?;
     Ok(())
+}
+
+const TRAY_ID: &str = "tasktimer";
+
+fn status_line(active: Option<&timer::ActiveSessionInfo>) -> String {
+    match active {
+        Some(a) => format!(
+            "{} — {} · {}{}",
+            a.class_course_code,
+            a.task_title,
+            elapsed_label(a.elapsed_seconds),
+            if a.is_paused { " (paused)" } else { "" }
+        ),
+        None => "No active timer".into(),
+    }
 }
 
 fn elapsed_label(seconds: i64) -> String {
@@ -283,9 +307,21 @@ pub fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         pomodoro,
         pending: Mutex::new(None),
     });
-    let mut builder = TrayIconBuilder::with_id("tasktimer")
+    // Left-click opens the app; the menu stays on right-click, as Windows users expect.
+    let mut builder = TrayIconBuilder::with_id(TRAY_ID)
         .tooltip("TaskTimer")
-        .menu(&menu);
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                show(tray.app_handle());
+            }
+        });
     if let Some(icon) = app.default_window_icon() {
         builder = builder.icon(icon.clone());
     }
@@ -344,7 +380,35 @@ pub fn list_startable_tasks(db: tauri::State<Db>) -> Result<Vec<PickerTask>, Str
 
 #[cfg(test)]
 mod tests {
-    use super::elapsed_label;
+    use super::{elapsed_label, status_line};
+    use crate::timer::{ActiveSessionInfo, Session};
+
+    #[test]
+    fn status_line_names_the_task_and_marks_a_pause() {
+        let mut active = ActiveSessionInfo {
+            session: Session {
+                id: 1,
+                task_id: 1,
+                start_ts: "2026-09-15 10:00:00".into(),
+                end_ts: None,
+                accumulated_pause_seconds: 0,
+                pause_started_ts: None,
+                final_duration_seconds: None,
+                edited: false,
+            },
+            task_title: "Case brief".into(),
+            class_course_code: "LGST".into(),
+            is_paused: false,
+            elapsed_seconds: 3661,
+        };
+        assert_eq!(status_line(Some(&active)), "LGST — Case brief · 1:01");
+        active.is_paused = true;
+        assert_eq!(
+            status_line(Some(&active)),
+            "LGST — Case brief · 1:01 (paused)"
+        );
+        assert_eq!(status_line(None), "No active timer");
+    }
 
     #[test]
     fn elapsed_label_is_compact_and_minute_accurate() {
