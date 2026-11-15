@@ -247,7 +247,8 @@ fn refresh(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     state.label.set_text(&status)?;
     if let Some(tray) = app.tray_by_id(TRAY_ID) {
         // Hovering the icon answers "what am I tracking?" without opening anything.
-        tray.set_tooltip(Some(format!("TaskTimer\n{status}")))?;
+        // Best-effort: a tooltip failure must not stop the menu items updating.
+        let _ = tray.set_tooltip(Some(format!("TaskTimer\n{status}")));
     }
     state
         .pause
@@ -307,19 +308,23 @@ pub fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         pomodoro,
         pending: Mutex::new(None),
     });
-    // Left-click opens the app; the menu stays on right-click, as Windows users expect.
+    // On Windows a left-click opens the app and the menu is on right-click.
+    // macOS keeps its convention: clicking a menu-bar icon opens the menu.
+    let click_opens_app = cfg!(target_os = "windows");
     let mut builder = TrayIconBuilder::with_id(TRAY_ID)
         .tooltip("TaskTimer")
         .menu(&menu)
-        .show_menu_on_left_click(false)
-        .on_tray_icon_event(|tray, event| {
+        .show_menu_on_left_click(!click_opens_app)
+        .on_tray_icon_event(move |tray, event| {
             if let TrayIconEvent::Click {
                 button: MouseButton::Left,
                 button_state: MouseButtonState::Up,
                 ..
             } = event
             {
-                show(tray.app_handle());
+                if click_opens_app {
+                    show(tray.app_handle());
+                }
             }
         });
     if let Some(icon) = app.default_window_icon() {
