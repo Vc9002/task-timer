@@ -9,9 +9,9 @@
   import { PRIORITY_LABELS, DEFAULT_PRIORITY } from "$lib/priority";
   import { TASK_TYPES, parseTags, taskTypeLabel } from "$lib/taskMetadata";
   type TreeTask = TaskRecord & { context_only?: boolean; overdue?: boolean };
-  let { task, tasks, courseCode, onchanged, onhistory, ondelete, onedit, path = [] }: {
+  let { task, tasks, courseCode, onchanged, onhistory, ondelete, path = [] }: {
     task: TreeTask; tasks: TreeTask[]; courseCode: string; onchanged: () => Promise<void>;
-    onhistory?: (id: number) => void; ondelete?: (id: number) => void; onedit?: (task: TaskRecord) => void; path?: number[];
+    onhistory?: (id: number) => void; ondelete?: (id: number) => void; path?: number[];
   } = $props();
   let busy = $state(false);
   let error = $state("");
@@ -144,7 +144,7 @@
   {#if children.length}
     <ul>
       {#each children as child (child.id)}
-        <TaskTreeNode task={child} {tasks} {courseCode} {onchanged} {onhistory} {ondelete} {onedit} path={[...path, task.id]} />
+        <TaskTreeNode task={child} {tasks} {courseCode} {onchanged} {onhistory} {ondelete} path={[...path, task.id]} />
       {/each}
     </ul>
   {/if}

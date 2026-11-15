@@ -15,6 +15,24 @@ class TimerStore {
   private tickHandle: ReturnType<typeof setInterval> | null = null;
   private request = 0;
   private disposed = false;
+  private touchHandle: ReturnType<typeof setTimeout> | null = null;
+
+  /**
+   * Tells pages their data may be stale. A timer command made in this window
+   * is reported twice (its own completion and the backend's "timer-changed"
+   * event, in either order), so requests within a short window become one
+   * `revision` bump and pages reload once instead of twice.
+   */
+  touch() {
+    if (this.touchHandle !== null) return;
+    this.touchHandle = setTimeout(() => { this.touchHandle = null; this.revision++; }, 40);
+  }
+
+  /** The timer changed outside this store: tray, global shortcut, another window, or our own echo. */
+  externalChange() {
+    void this.refresh();
+    this.touch();
+  }
 
   private applyActive(info: ActiveSessionInfo | null) {
     this.active = info;
@@ -47,7 +65,7 @@ class TimerStore {
     this.busy = true;
     ++this.request;
     this.error = "";
-    try { await action(); this.revision++; }
+    try { await action(); this.touch(); }
     catch { this.error = "TaskTimer couldn't save the timer change. Try again."; }
     finally { this.busy = false; }
   }

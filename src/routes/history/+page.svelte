@@ -1,13 +1,9 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { getDayView, editSessionDuration, type DayView } from "$lib/api";
-  import { formatDurationShort } from "$lib/format";
+  import { formatDurationShort, localDate } from "$lib/format";
 
-  function todayIso() {
-    return new Date().toLocaleDateString("en-CA"); // YYYY-MM-DD in local time
-  }
-
-  let date = $state(todayIso());
+  let date = $state(localDate());
   let view = $state<DayView | null>(null);
   let error = $state("");
   let editingId = $state<number | null>(null);
@@ -25,7 +21,7 @@
   function shiftDay(delta: number) {
     const d = new Date(date + "T00:00:00");
     d.setDate(d.getDate() + delta);
-    date = d.toLocaleDateString("en-CA");
+    date = localDate(d);
     load();
   }
 

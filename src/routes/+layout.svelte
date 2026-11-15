@@ -36,7 +36,7 @@
       let disposed = false;
       const unlisteners: UnlistenFn[] = [];
       const addListener = (promise: Promise<UnlistenFn>) => void promise.then(unlisten => { if (disposed) unlisten(); else unlisteners.push(unlisten); }).catch(() => {});
-      addListener(listen("timer-changed", () => { void timerStore.refresh(); timerStore.revision++; }));
+      addListener(listen("timer-changed", () => timerStore.externalChange()));
       const refresh = () => { if (document.visibilityState === "visible") void timerStore.refresh(); };
       window.addEventListener("focus", refresh);
       document.addEventListener("visibilitychange", refresh);
@@ -66,7 +66,7 @@
       if (pending === "start-task") pickerOpen = true;
       if (pending === "quick-add") await openQuickAdd();
     };
-    addListener(listen("timer-changed", () => { void timerStore.refresh(); timerStore.revision++; }));
+    addListener(listen("timer-changed", () => timerStore.externalChange()));
     addListener(listen<string>("desktop-error", event => timerStore.error = event.payload));
     addListener(listen("desktop-action", () => { void action(); }));
     void action().catch(() => {});

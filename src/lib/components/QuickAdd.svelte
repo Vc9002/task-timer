@@ -71,7 +71,7 @@
       } else {
         await createTask({ class_id: classId, parent_task_id: parentId, title: title.trim(), description: null, priority: null, due_at: due || null, scheduled_date: scheduledDate(), estimated_minutes: estimate ?? null, task_type: taskType, tags: parseTags(tags), time_budget_minutes: budget ?? null });
       }
-      timerStore.revision++;
+      timerStore.touch();
       window.dispatchEvent(new Event("tasks-changed"));
       onclose();
     } catch { error = "Couldn't create the task. Check its details and try again."; }
