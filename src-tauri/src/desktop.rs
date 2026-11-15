@@ -27,7 +27,11 @@ pub fn notify_hidden_to_tray_once(app: &AppHandle) {
         .notification()
         .builder()
         .title("TaskTimer is still running")
-        .body("It's in your menu bar — click the tray icon to bring it back.")
+        .body(if cfg!(target_os = "macos") {
+            "It's in your menu bar. Click the TaskTimer icon to bring it back."
+        } else {
+            "It's in the system tray. Click the TaskTimer icon to bring it back."
+        })
         .show();
 }
 

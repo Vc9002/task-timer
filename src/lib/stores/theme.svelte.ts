@@ -10,8 +10,17 @@ class ThemeStore {
   accent = $state<string | null>(null);
   accentSoft = $state<string | null>(null);
   opacity = $state(100);
+  private listening = false;
 
   load() {
+    // The mini timer and quick-capture windows are separate webviews; pick up
+    // appearance changes made in the main window's Settings without a restart.
+    if (!this.listening) {
+      this.listening = true;
+      window.addEventListener("storage", (event) => {
+        if (event.key === null || event.key.startsWith("tasktimer-")) this.load();
+      });
+    }
     const storedMode = localStorage.getItem(MODE_KEY);
     if (storedMode === "light" || storedMode === "dark" || storedMode === "system") this.mode = storedMode;
     this.accent = localStorage.getItem(ACCENT_KEY);
@@ -52,6 +61,9 @@ class ThemeStore {
     else root.setAttribute("data-theme", this.mode);
     if (this.accent) root.style.setProperty("--accent", this.accent);
     else root.style.removeProperty("--accent");
+    // Preset accents are all dark enough for white text, in either theme.
+    if (this.accent) root.style.setProperty("--on-accent", "#ffffff");
+    else root.style.removeProperty("--on-accent");
     if (this.accentSoft) root.style.setProperty("--accent-soft", this.accentSoft);
     else root.style.removeProperty("--accent-soft");
     root.style.setProperty("--window-opacity-pct", `${this.opacity}%`);

@@ -14,6 +14,11 @@
     pause: "M8 5v14M16 5v14",
     check: "m5 12 4 4L19 6",
     close: "m6 6 12 12M6 18 18 6",
+    inbox: "M3 13h5l1.5 3h5L16 13h5M5.5 5h13L21 13v6H3v-6l2.5-8Z",
+    calendar: "M8 2v4m8-4v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14H3V6a2 2 0 0 1 2-2Z",
+    semester: "M12 4 2 9l10 5 10-5-10-5ZM6 11.5V16c1.5 1.5 3.5 2.2 6 2.2s4.5-.7 6-2.2v-4.5M22 9v5",
+    focus: "M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5",
+    mini: "M3 5h18v14H3V5Zm9 7h7v5h-7v-5Z",
   };
 </script>
 <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d={paths[name] ?? paths.clock} /></svg>

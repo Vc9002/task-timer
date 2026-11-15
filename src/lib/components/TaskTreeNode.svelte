@@ -2,7 +2,8 @@
   import TaskTreeNode from "./TaskTreeNode.svelte";
   import { completeTodoistTask, duplicateTask, scheduleTask, setTaskStatus, updateTask, type TaskRecord, type TaskType } from "$lib/api";
   import { timerStore } from "$lib/stores/timer.svelte";
-  import { formatDurationShort, localDate } from "$lib/format";
+  import { formatDurationShort, formatDue, localDate } from "$lib/format";
+  import { toastStore } from "$lib/stores/toast.svelte";
   import Icon from "./Icon.svelte";
   import TaskPlanning from "./TaskPlanning.svelte";
   import { PRIORITY_LABELS, DEFAULT_PRIORITY } from "$lib/priority";
@@ -24,9 +25,19 @@
   let editTags = $state("");
   let editBudget = $state("");
   let editNotes = $state("");
-  let undoStatus = $state<TaskRecord["status"] | null>(null);
   let planningOpen = $state(false);
   let menu: HTMLDetailsElement;
+  let menuOpen = $state(false);
+  // Close the actions menu on an outside click or Escape. Listeners exist only while it is open.
+  $effect(() => {
+    if (!menuOpen) return;
+    const close = () => { if (menu) menu.open = false; };
+    const onPointer = (event: PointerEvent) => { if (menu && !menu.contains(event.target as Node)) close(); };
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") { close(); menu?.querySelector("summary")?.focus(); } };
+    document.addEventListener("pointerdown", onPointer);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("pointerdown", onPointer); document.removeEventListener("keydown", onKey); };
+  });
   let children = $derived(tasks.filter(t => t.parent_task_id === task.id && !path.includes(t.id) && t.id !== task.id));
   async function change(action: () => Promise<unknown>) {
     if (busy) return false;
@@ -43,9 +54,15 @@
     if (task.source === "todoist") await change(() => completeTodoistTask(task.id));
     else {
       const previous = task.status;
-      if (await change(() => setTaskStatus(task.id, task.status === "completed" ? "not_started" : "completed"))) {
-        undoStatus = previous;
-        window.setTimeout(() => { undoStatus = null; }, 5000);
+      const id = task.id;
+      const completing = task.status !== "completed";
+      if (await change(() => setTaskStatus(id, completing ? "completed" : "not_started")) && completing) {
+        // The row may leave the list once completed, so the undo lives in a page-level toast.
+        toastStore.show({
+          message: `Completed “${task.title}”`,
+          actionLabel: "Undo",
+          action: async () => { await setTaskStatus(id, previous); await onchanged(); },
+        });
       }
     }
   }
@@ -61,7 +78,7 @@
       <span class="badges">
       {#if task.source === "todoist"}<small title="Complete and edit deadlines in Todoist, then sync">Todoist</small>{/if}
       {#if task.external_state !== "active"}<small>{task.external_state}</small>{/if}
-      {#if task.overdue}<small class="overdue">Overdue</small>{:else if task.due_at}<small>Due {task.due_at.slice(5, 10).replace("-", "/")}</small>{/if}
+      {#if task.overdue}<small class="overdue">Overdue</small>{:else if task.due_at}<small>Due {formatDue(task.due_at)}</small>{/if}
       {#if task.context_only}<small>Parent task</small>{/if}
       <small>{taskTypeLabel(task.task_type)}</small>
       {#each task.tags as tag}<small>#{tag}</small>{/each}
@@ -79,7 +96,7 @@
         <Icon name={timerStore.active?.session.task_id === task.id ? "clock" : "play"} size={15} />
       </button>
     {/if}
-    <details bind:this={menu}>
+    <details bind:this={menu} ontoggle={() => menuOpen = menu.open}>
       <summary aria-label={`Actions for ${task.title}`}>•••</summary>
       <div class="actions">
         {#if task.due_at}<small>Due: {task.due_at.slice(0, 10)}</small>{/if}
@@ -94,7 +111,7 @@
         <button onclick={() => { planningOpen = !planningOpen; menu.open = false; }}>Plan blocks &amp; milestones</button>
         {#if task.source === "local"}<button disabled={busy} onclick={() => change(() => duplicateTask(task.id))}>Duplicate</button>{/if}
         {#if onhistory}<button onclick={() => onhistory?.(task.id)}>History</button>{/if}
-        {#if ondelete && task.source === "local"}<button onclick={() => ondelete?.(task.id)}>Delete</button>{/if}
+        {#if ondelete && task.source === "local"}<button class="danger" onclick={() => ondelete?.(task.id)}>Delete</button>{/if}
       </div>
     </details>
   </div>
@@ -117,7 +134,6 @@
       <div class="edit-buttons"><button type="submit" disabled={busy}>Save changes</button><button type="button" disabled={busy} onclick={() => editing = false}>Cancel</button></div>
     </form>
   {/if}
-  {#if undoStatus && task.status !== undoStatus}<button class="undo" disabled={busy} onclick={() => change(() => setTaskStatus(task.id, undoStatus ?? "not_started")).then(ok => { if (ok) undoStatus = null; })}>Undo completion</button>{/if}
   {#if error}<p role="alert">{error}</p>{/if}
   {#if planningOpen}<TaskPlanning {task} onchanged={onchanged} />{/if}
   {#if children.length}
@@ -131,23 +147,28 @@
 <style>
 li { list-style: none; min-width: 0; }
   ul { padding-left: 18px; margin: 0 0 0 7px; border-left: 1px solid var(--line); }
-  .task-row { display: flex; gap: 10px; align-items: center; min-height: 54px; padding: 7px 4px; border-bottom: 1px solid var(--line); }
-  .task-row.tracking { background: var(--accent-soft); border-radius: 6px; padding-inline: 7px; }
+  .task-row { display: flex; gap: 10px; align-items: center; min-height: 52px; padding: 7px 7px; border-bottom: 1px solid var(--line); transition: background-color .12s ease-out; }
+  .task-row:hover { background: var(--hover); }
+  .task-row.tracking { background: var(--accent-soft); border-radius: 6px; }
   .title { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 13px; line-height: 1.4; }
   .done { text-decoration: line-through; color: var(--muted); }
-  .badges { display: flex; gap: 7px; flex-wrap: wrap; }
-  small { font-size: 10px; color: var(--muted); font-weight: 400; }
-  small.overdue { color: var(--danger); }
+  .badges { display: flex; gap: 3px 8px; flex-wrap: wrap; margin-top: 1px; }
+  small { font-size: 11px; color: var(--muted); font-weight: 400; }
+  small.overdue { color: var(--danger); font-weight: 600; }
   small.blocked { color: var(--danger); }
   .meta { min-width: 40px; text-align: right; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
-  .meta small { display: block; font-size: 9px; }
+  .meta small { display: block; font-size: 10px; }
   .start { padding: 0; min-height: 29px; width: 29px; color: var(--accent); border-color: transparent; background: var(--accent-soft); flex-shrink: 0; }
-  summary { cursor: pointer; list-style: none; color: var(--muted); width: 24px; text-align: center; padding: 5px 0; border-radius: 4px; }
+  .start:hover:not(:disabled) { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+  .tracking .start { background: transparent; opacity: 1; }
+  summary { cursor: pointer; list-style: none; color: var(--muted); width: 28px; text-align: center; padding: 5px 0; border-radius: 6px; letter-spacing: 1px; }
+  details[open] > summary { background: var(--hover); color: var(--text); }
   summary::-webkit-details-marker { display: none; }
   summary:hover { background: var(--hover); }
   details { position: relative; }
-  .actions { position: absolute; z-index: 5; right: 0; width: 205px; padding: 7px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; display: grid; gap: 3px; box-shadow: var(--shadow); }
-  .actions button { border: 0; background: transparent; justify-content: start; font-size: 12px; }
+  .actions { position: absolute; z-index: 5; right: 0; top: calc(100% + 4px); width: 215px; padding: 6px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; display: grid; gap: 3px; box-shadow: var(--shadow); }
+  .actions button { border: 0; background: transparent; justify-content: start; font-size: 12px; min-height: 30px; }
+  .actions button:hover:not(:disabled) { background: var(--hover); }
   .actions small { padding: 3px 8px; }
   .context > .title { color: var(--muted); }
   .edit-form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 15px; background: var(--hover); border-radius: 8px; margin-block: 8px; }
