@@ -157,6 +157,19 @@ fn due_date_expr(column: &str) -> String {
     format!("CASE WHEN length({column})=10 THEN date({column}) ELSE date({column},'localtime') END")
 }
 
+/// SQL predicate: `column` (a UTC timestamp) falls on a local calendar day from
+/// `first_day` to `last_day` inclusive, both SQL expressions yielding local dates.
+///
+/// Equivalent to `date(column,'localtime') BETWEEN first_day AND last_day`, but
+/// written as a range over the raw column so SQLite can use its index instead
+/// of converting every row. `'+1 day'` must come before `'utc'` so a day that
+/// gains or loses an hour to daylight saving keeps its real local length.
+pub(crate) fn local_day_range(column: &str, first_day: &str, last_day: &str) -> String {
+    format!(
+        "({column} >= datetime({first_day},'utc') AND {column} < datetime({last_day},'+1 day','utc'))"
+    )
+}
+
 fn range_summary(
     conn: &rusqlite::Connection,
     date_filter_sql: &str,
@@ -187,46 +200,49 @@ fn range_summary(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_analytics_today(db: State<Db>) -> Result<RangeSummary, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
-    range_summary(
-        &conn,
-        "date(ts.start_ts, 'localtime') = date('now', 'localtime')",
-    )
-    .map_err(|e| e.to_string())
+    let today = "date('now','localtime')";
+    range_summary(&conn, &local_day_range("ts.start_ts", today, today)).map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_analytics_week(db: State<Db>) -> Result<RangeSummary, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
+    // From this week's Monday (local) onward.
     range_summary(
         &conn,
-        "date(ts.start_ts, 'localtime') >= date('now', 'localtime', '-' || ((CAST(strftime('%w', 'now', 'localtime') AS INTEGER) + 6) % 7) || ' days')",
+        "ts.start_ts >= datetime(date('now', 'localtime', '-' || ((CAST(strftime('%w', 'now', 'localtime') AS INTEGER) + 6) % 7) || ' days'),'utc')",
     )
     .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_analytics_month(db: State<Db>) -> Result<RangeSummary, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     range_summary(
         &conn,
-        "strftime('%Y-%m', ts.start_ts, 'localtime') = strftime('%Y-%m', 'now', 'localtime')",
+        &local_day_range(
+            "ts.start_ts",
+            "date('now','localtime','start of month')",
+            "date('now','localtime','start of month','+1 month','-1 day')",
+        ),
     )
     .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_day_view(db: State<Db>, date: String) -> Result<DayView, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
 
+    let day_filter = local_day_range("ts.start_ts", "date(?1)", "date(?1)");
     let by_class_sql = format!(
         "SELECT c.id, c.course_code, COALESCE(SUM({DURATION_EXPR}), 0) as secs
          FROM time_sessions ts
          JOIN tasks t ON t.id = ts.task_id
          JOIN classes c ON c.id = t.class_id
-         WHERE ts.end_ts IS NOT NULL AND date(ts.start_ts, 'localtime') = date(?1)
+         WHERE ts.end_ts IS NOT NULL AND {day_filter}
          GROUP BY c.id, c.course_code
          ORDER BY secs DESC"
     );
@@ -250,7 +266,7 @@ pub fn get_day_view(db: State<Db>, date: String) -> Result<DayView, String> {
          FROM time_sessions ts
          JOIN tasks t ON t.id = ts.task_id
          JOIN classes c ON c.id = t.class_id
-         WHERE ts.end_ts IS NOT NULL AND date(ts.start_ts, 'localtime') = date(?1)
+         WHERE ts.end_ts IS NOT NULL AND {day_filter}
          ORDER BY ts.start_ts"
     );
     let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
@@ -278,7 +294,7 @@ pub fn get_day_view(db: State<Db>, date: String) -> Result<DayView, String> {
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_task_history(db: State<Db>, task_id: i64) -> Result<TaskHistory, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     let estimated_minutes: Option<i64> = conn
@@ -429,11 +445,12 @@ fn session_stats(
     start_date: &str,
     end_date: &str,
 ) -> rusqlite::Result<SessionStats> {
+    let range_filter = local_day_range("ts.start_ts", "date(?1)", "date(?2)");
     let sql = format!(
         "SELECT {DURATION_EXPR}
          FROM time_sessions ts
          WHERE ts.end_ts IS NOT NULL
-           AND date(ts.start_ts,'localtime') BETWEEN date(?1) AND date(?2)"
+           AND {range_filter}"
     );
     let mut durations: Vec<i64> = conn
         .prepare(&sql)?
@@ -474,9 +491,10 @@ fn block_summary(
         rusqlite::params![start_date, end_date],
         |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
     )?;
+    let range_filter = local_day_range("ts.start_ts", "date(?1)", "date(?2)");
     let sql = format!(
         "SELECT COALESCE(SUM({DURATION_EXPR}),0) FROM time_sessions ts
-         WHERE ts.end_ts IS NOT NULL AND date(ts.start_ts,'localtime') BETWEEN date(?1) AND date(?2)
+         WHERE ts.end_ts IS NOT NULL AND {range_filter}
            AND EXISTS (SELECT 1 FROM study_blocks sb WHERE sb.task_id=ts.task_id AND sb.planned_date BETWEEN ?1 AND ?2)"
     );
     let actual_tracked_seconds =
@@ -492,7 +510,7 @@ fn block_summary(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_estimate_analytics(
     db: State<Db>,
     start_date: String,
@@ -585,7 +603,7 @@ fn suggestion_for(
     Some((median(&mut actuals), filtered.len() as i64))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_estimate_suggestion(
     db: State<Db>,
     class_id: i64,
@@ -735,16 +753,17 @@ fn schedule_coverage(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_weekly_review(db: State<Db>, start_date: String) -> Result<WeeklyReview, String> {
     let start = NaiveDate::parse_from_str(&start_date, "%Y-%m-%d")
         .map_err(|_| "Choose a valid start date.".to_string())?;
     let end_date = (start + Duration::days(6)).to_string();
     let conn = db.0.lock().map_err(|e| e.to_string())?;
+    let range_filter = local_day_range("ts.start_ts", "date(?1)", "date(?2)");
     let summary_sql = format!(
         "SELECT c.id, c.course_code, COALESCE(SUM({DURATION_EXPR}),0)
          FROM time_sessions ts JOIN tasks t ON t.id=ts.task_id JOIN classes c ON c.id=t.class_id
-         WHERE ts.end_ts IS NOT NULL AND date(ts.start_ts,'localtime') BETWEEN date(?1) AND date(?2)
+         WHERE ts.end_ts IS NOT NULL AND {range_filter}
          GROUP BY c.id,c.course_code ORDER BY 3 DESC"
     );
     let by_class: Vec<ClassTotal> = conn
@@ -853,50 +872,44 @@ fn longest_streak(days_with_time: &std::collections::BTreeSet<NaiveDate>) -> i64
     longest
 }
 
-fn tracked_days(
+/// Days with tracked time, grouped by class, from a single scan of the sessions.
+fn tracked_days_by_class(
     conn: &rusqlite::Connection,
-    class_id: Option<i64>,
-) -> rusqlite::Result<std::collections::BTreeSet<NaiveDate>> {
+) -> rusqlite::Result<std::collections::HashMap<i64, std::collections::BTreeSet<NaiveDate>>> {
     let sql = format!(
-        "SELECT DISTINCT date(ts.start_ts,'localtime') FROM time_sessions ts
+        "SELECT DISTINCT t.class_id, date(ts.start_ts,'localtime') FROM time_sessions ts
          JOIN tasks t ON t.id = ts.task_id
-         WHERE ts.end_ts IS NOT NULL AND {DURATION_EXPR} > 0
-         {}",
-        if class_id.is_some() {
-            "AND t.class_id = ?1"
-        } else {
-            ""
-        }
+         WHERE ts.end_ts IS NOT NULL AND {DURATION_EXPR} > 0"
     );
     let mut stmt = conn.prepare(&sql)?;
-    let map_row = |row: &rusqlite::Row| -> rusqlite::Result<String> { row.get(0) };
-    let rows: Vec<String> = if let Some(id) = class_id {
-        stmt.query_map([id], map_row)?.collect::<Result<_, _>>()?
-    } else {
-        stmt.query_map([], map_row)?.collect::<Result<_, _>>()?
-    };
-    Ok(rows
-        .into_iter()
-        .filter_map(|d| NaiveDate::parse_from_str(&d, "%Y-%m-%d").ok())
-        .collect())
+    let rows = stmt.query_map([], |row| {
+        Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+    })?;
+    let mut by_class: std::collections::HashMap<i64, std::collections::BTreeSet<NaiveDate>> =
+        std::collections::HashMap::new();
+    for row in rows {
+        let (class_id, day) = row?;
+        if let Ok(day) = NaiveDate::parse_from_str(&day, "%Y-%m-%d") {
+            by_class.entry(class_id).or_default().insert(day);
+        }
+    }
+    Ok(by_class)
 }
 
-#[tauri::command]
-pub fn get_streaks(db: State<Db>) -> Result<Streaks, String> {
-    let conn = db.0.lock().map_err(|e| e.to_string())?;
-    let today = chrono::Local::now().date_naive();
-    let all_days = tracked_days(&conn, None).map_err(|e| e.to_string())?;
+fn streaks_for(conn: &rusqlite::Connection, today: NaiveDate) -> rusqlite::Result<Streaks> {
+    let days_by_class = tracked_days_by_class(conn)?;
+    let all_days: std::collections::BTreeSet<NaiveDate> =
+        days_by_class.values().flatten().copied().collect();
     let classes: Vec<(i64, String)> = conn
-        .prepare("SELECT id, course_code FROM classes ORDER BY course_code")
-        .map_err(|e| e.to_string())?
-        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
-        .map_err(|e| e.to_string())?
-        .collect::<Result<_, _>>()
-        .map_err(|e| e.to_string())?;
+        .prepare("SELECT id, course_code FROM classes ORDER BY course_code")?
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .collect::<Result<_, _>>()?;
     let mut by_class = Vec::new();
     for (class_id, course_code) in classes {
-        let days = tracked_days(&conn, Some(class_id)).map_err(|e| e.to_string())?;
-        let streak = current_streak(&days, today);
+        let Some(days) = days_by_class.get(&class_id) else {
+            continue;
+        };
+        let streak = current_streak(days, today);
         if streak > 0 {
             by_class.push(ClassStreak {
                 class_id,
@@ -911,6 +924,12 @@ pub fn get_streaks(db: State<Db>) -> Result<Streaks, String> {
         longest_streak_days: longest_streak(&all_days),
         by_class,
     })
+}
+
+#[tauri::command(async)]
+pub fn get_streaks(db: State<Db>) -> Result<Streaks, String> {
+    let conn = db.0.lock().map_err(|e| e.to_string())?;
+    streaks_for(&conn, chrono::Local::now().date_naive()).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -956,5 +975,79 @@ mod streak_tests {
         .into_iter()
         .collect();
         assert_eq!(longest_streak(&days), 3);
+    }
+
+    #[test]
+    fn streaks_are_computed_per_class_from_one_scan() {
+        let conn = crate::db::test_connection();
+        conn.execute_batch(
+            "INSERT INTO classes(id,course_code,semester) VALUES (1,'AAA','Fall'),(2,'BBB','Fall'),(3,'CCC','Fall');
+             INSERT INTO tasks(id,class_id,title) VALUES (1,1,'a'),(2,2,'b'),(3,3,'c');
+             INSERT INTO time_sessions(task_id,start_ts,end_ts,final_duration_seconds) VALUES
+              (1,datetime('2026-09-18 12:00','utc'),datetime('2026-09-18 13:00','utc'),3600),
+              (1,datetime('2026-09-19 12:00','utc'),datetime('2026-09-19 13:00','utc'),3600),
+              (1,datetime('2026-09-20 12:00','utc'),datetime('2026-09-20 13:00','utc'),3600),
+              (2,datetime('2026-09-20 12:00','utc'),datetime('2026-09-20 13:00','utc'),3600),
+              (2,datetime('2026-09-20 14:00','utc'),datetime('2026-09-20 15:00','utc'),3600),
+              (3,datetime('2026-09-01 12:00','utc'),datetime('2026-09-01 13:00','utc'),3600),
+              (3,datetime('2026-09-20 16:00','utc'),datetime('2026-09-20 16:00','utc'),0);",
+        )
+        .unwrap();
+        let streaks = streaks_for(&conn, date("2026-09-20")).unwrap();
+        assert_eq!(streaks.current_streak_days, 3);
+        assert_eq!(streaks.longest_streak_days, 3);
+        let classes: Vec<(&str, i64)> = streaks
+            .by_class
+            .iter()
+            .map(|c| (c.course_code.as_str(), c.current_streak_days))
+            .collect();
+        // CCC's only recent session has zero duration, so it has no streak.
+        assert_eq!(classes, vec![("AAA", 3), ("BBB", 1)]);
+    }
+}
+
+#[cfg(test)]
+mod local_day_range_tests {
+    use super::local_day_range;
+
+    /// The indexed range must select exactly the rows the old per-row
+    /// `date(start_ts,'localtime')` filter did, for every local day in a year of
+    /// half-hourly timestamps. In a zone with daylight saving this covers both
+    /// clock changes; in UTC (as on CI) it only checks the plain case.
+    #[test]
+    fn matches_per_row_local_date_for_every_day_of_a_year() {
+        let conn = crate::db::test_connection();
+        conn.execute_batch(
+            "INSERT INTO classes(id,course_code,semester) VALUES(1,'A','Fall');
+             INSERT INTO tasks(id,class_id,title) VALUES(1,1,'t');
+             WITH RECURSIVE n(i) AS (SELECT 0 UNION ALL SELECT i+1 FROM n WHERE i<17567)
+             INSERT INTO time_sessions(task_id,start_ts,end_ts,final_duration_seconds)
+             SELECT 1, datetime('2026-01-01 00:00:00','+'||(i*30)||' minutes'), 'x', 60 FROM n;",
+        )
+        .unwrap();
+        let new_filter = local_day_range("start_ts", "date(?1)", "date(?1)");
+        let mismatches: i64 = conn
+            .query_row(
+                &format!(
+                    "SELECT COUNT(*) FROM (SELECT DISTINCT date(start_ts,'localtime') AS d FROM time_sessions) days
+                     WHERE (SELECT COUNT(*) FROM time_sessions WHERE date(start_ts,'localtime') = days.d)
+                        != (SELECT COUNT(*) FROM time_sessions WHERE {})",
+                    new_filter.replace("?1", "days.d")
+                ),
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(mismatches, 0);
+        let plan: String = conn
+            .query_row(
+                &format!(
+                    "EXPLAIN QUERY PLAN SELECT COUNT(*) FROM time_sessions WHERE {new_filter}"
+                ),
+                ["2026-06-01"],
+                |r| r.get(3),
+            )
+            .unwrap();
+        assert!(plan.contains("idx_time_sessions_start_ts"), "{plan}");
     }
 }

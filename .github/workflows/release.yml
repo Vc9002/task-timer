@@ -9,6 +9,31 @@ permissions:
   contents: write
 
 jobs:
+  verify:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/windows-rc
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: node scripts/verify-versions.mjs
+      - run: npm run check
+      - run: npm audit --audit-level=high
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: cargo fmt --check
+        working-directory: src-tauri
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+        working-directory: src-tauri
+      - run: cargo test --lib
+        working-directory: src-tauri
   # Both platform jobs only build and sign. They upload their artifacts to
   # the workflow run; the publish job below creates the GitHub release once,
   # with a single latest.json that lists every platform. Creating the release
@@ -16,6 +41,7 @@ jobs:
   # would overwrite the other's latest.json.
 
   macos:
+    needs: verify
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,10 +53,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin
-      - uses: actions/cache@v4
+      - uses: Swatinem/rust-cache@v2
         with:
-          path: ~/.cargo
-          key: ${{ runner.os }}-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
+          workspaces: src-tauri
       - run: npx tauri build --target aarch64-apple-darwin
 
       # tauri-action isn't used here: its own updater-artifact packaging has
@@ -59,22 +84,23 @@ jobs:
           if-no-files-found: error
 
   windows:
+    needs: verify
     runs-on: windows-latest
     defaults:
       run:
         shell: bash
     steps:
       - uses: actions/checkout@v4
+      - uses: ./.github/actions/windows-rc
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
       - run: npm ci
       - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/cache@v4
+      - uses: Swatinem/rust-cache@v2
         with:
-          path: ~/.cargo
-          key: ${{ runner.os }}-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
+          workspaces: src-tauri
       - run: npx tauri build --bundles nsis
 
       # Tauri v2 on Windows uses the NSIS installer .exe itself as the updater

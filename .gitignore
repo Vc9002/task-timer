@@ -17,3 +17,6 @@ Cargo.lock.bak
 *.sqlite
 *.sqlite3
 *.db
+
+# Local skill observations are session notes, not app source.
+/skill-observations/

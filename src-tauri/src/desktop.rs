@@ -27,7 +27,11 @@ pub fn notify_hidden_to_tray_once(app: &AppHandle) {
         .notification()
         .builder()
         .title("TaskTimer is still running")
-        .body("It's in your menu bar — click the tray icon to bring it back.")
+        .body(if cfg!(target_os = "macos") {
+            "It's in your menu bar. Click the TaskTimer icon to bring it back."
+        } else {
+            "It's in the system tray. Click the TaskTimer icon to bring it back."
+        })
         .show();
 }
 
@@ -90,7 +94,9 @@ fn register(app: &AppHandle, shortcut: Shortcut, action: usize) -> Result<(), St
         }
     }).map_err(|_| "That shortcut couldn't be registered. It may be used by another application; choose another combination.".into())
 }
-pub fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+/// Registers shortcuts and desktop state. Returns whether the main window
+/// should start hidden (launched at login with "start hidden" on).
+pub fn setup(app: &AppHandle) -> Result<bool, Box<dyn std::error::Error>> {
     app.manage(HiddenToTrayNotice(AtomicBool::new(false)));
     let settings = {
         let db = app.state::<Db>();
@@ -143,12 +149,7 @@ pub fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         update: Mutex::new(()),
         warning: Mutex::new(warning),
     });
-    if hidden {
-        if let Some(window) = app.get_webview_window("main") {
-            window.hide()?;
-        }
-    }
-    Ok(())
+    Ok(hidden)
 }
 #[tauri::command]
 pub fn desktop_status(app: AppHandle) -> Result<Status, String> {

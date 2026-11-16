@@ -89,7 +89,10 @@ fn validate(i: &NewRecurringTemplate) -> Result<(), String> {
     Ok(())
 }
 fn should_generate(t: &RecurringTemplate, date: NaiveDate) -> bool {
-    let start = NaiveDate::parse_from_str(&t.start_date, "%Y-%m-%d").unwrap();
+    // A malformed stored date must never panic: the release build aborts on panic.
+    let Ok(start) = NaiveDate::parse_from_str(&t.start_date, "%Y-%m-%d") else {
+        return false;
+    };
     if date < start
         || t.end_date
             .as_ref()
@@ -120,7 +123,10 @@ pub(crate) fn ensure_generated(conn: &Connection, horizon_days: i64) -> rusqlite
     let ts: Vec<RecurringTemplate> = conn.prepare("SELECT id,class_id,title,description,priority,estimated_minutes,recurrence_type,interval,weekdays,start_date,end_date,active FROM recurring_task_templates WHERE active=1")?.query_map([], template_row)?.collect::<Result<_,_>>()?;
     let mut count = 0;
     for t in ts {
-        let mut d = today.max(NaiveDate::parse_from_str(&t.start_date, "%Y-%m-%d").unwrap());
+        let Ok(start) = NaiveDate::parse_from_str(&t.start_date, "%Y-%m-%d") else {
+            continue;
+        };
+        let mut d = today.max(start);
         while d <= horizon {
             if should_generate(&t, d) {
                 count += conn.execute("INSERT OR IGNORE INTO tasks(class_id,title,description,priority,scheduled_date,estimated_minutes,recurring_template_id,occurrence_date) VALUES(?1,?2,?3,?4,?5,?6,?7,?5)", params![t.class_id,t.title,t.description,t.priority,d.to_string(),t.estimated_minutes,t.id])?;
@@ -217,7 +223,7 @@ pub struct CalendarDay {
     pub due: Vec<Task>,
     pub study_blocks: Vec<crate::commands::planning::StudyBlock>,
 }
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_calendar(db: State<Db>, month: String) -> Result<Vec<CalendarDay>, String> {
     let first = NaiveDate::parse_from_str(&(month + "-01"), "%Y-%m-%d")
         .map_err(|_| "Choose a valid month")?;
@@ -285,5 +291,16 @@ mod tests {
                 .unwrap(),
             4
         );
+    }
+
+    #[test]
+    fn malformed_start_date_is_skipped_instead_of_panicking() {
+        let c = crate::db::test_connection();
+        c.execute_batch(
+            "INSERT INTO classes(id,course_code,semester) VALUES(1,'LGST','Fall');
+             INSERT INTO recurring_task_templates(class_id,title,recurrence_type,start_date) VALUES(1,'Broken','daily','not-a-date');",
+        )
+        .unwrap();
+        assert_eq!(ensure_generated(&c, 3).unwrap(), 0);
     }
 }

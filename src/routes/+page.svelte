@@ -4,7 +4,7 @@
   import Icon from "$lib/components/Icon.svelte";
   import { getToday, type TodaySummary } from "$lib/api";
   import { timerStore } from "$lib/stores/timer.svelte";
-  import { formatDurationShort, localDate } from "$lib/format";
+  import { formatDurationShort, formatDue, localDate } from "$lib/format";
 
   let today = $state<TodaySummary | null>(null);
   let error = $state("");
@@ -56,8 +56,8 @@
               <span class="rank">{i + 1}</span>
               <div>
                 <strong>{task.title}</strong>
-                <span class="meta">
-                  {#if task.overdue}Overdue{:else if task.due_at}Due {new Date(task.due_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}{:else if task.scheduled_date === new Date().toISOString().slice(0, 10)}Scheduled today{/if}
+                <span class="meta" class:overdue={task.overdue}>
+                  {#if task.overdue}Overdue{:else if task.due_at}Due {formatDue(task.due_at)}{:else if task.scheduled_date === localDate()}Scheduled today{/if}
                   {#if task.remaining_minutes !== null}· {task.remaining_minutes}m remaining{/if}
                 </span>
               </div>
@@ -95,13 +95,14 @@ header { display: flex; justify-content: space-between; align-items: end; gap: 1
   .next-up { margin-bottom: 30px; }
   .next-up h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 10px; }
   .next-up ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-  .next-up li { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; }
+  .next-up li { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
   .next-up li > div { flex: 1; min-width: 0; }
   .next-up li > button { flex-shrink: 0; }
   .start-btn { background: var(--accent-soft); color: var(--accent); border-color: transparent; font-size: 12px; font-weight: 600; }
-  .start-btn:hover:not(:disabled) { background: var(--accent); color: white; }
+  .start-btn:hover:not(:disabled) { background: var(--accent); color: var(--on-accent); }
   .next-up .rank { font-size: 12px; font-weight: 700; color: var(--muted); width: 16px; }
-  .next-up strong { display: block; font-size: 13px; }
+  .next-up strong { display: block; font-size: 13px; overflow-wrap: anywhere; }
+  .next-up .meta.overdue { color: var(--danger); }
   .next-up .meta { font-size: 11px; color: var(--muted); }
   .class-group { margin-bottom: 30px; }
   .class-group h2 { display: flex; align-items: center; gap: 10px; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 0 0 8px; }

@@ -3,6 +3,7 @@
   import { invoke } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
   import { createTask, listClasses, type ClassRecord } from "$lib/api";
+  import { parseQuickCapture } from "$lib/quickCapture";
 
   let classes = $state<ClassRecord[]>([]);
   let shorthand = $state("");
@@ -21,35 +22,27 @@
     const onKeydown = (event: KeyboardEvent) => {
       if (event.key === "Escape") void invoke("hide_quick_capture");
     };
+    // The window is created on first use, so this page can mount before the
+    // window is shown and focused, and miss the "shown" event. Focus the box
+    // when the window gains focus, and keep trying briefly after mount, so
+    // typing works immediately on the very first open too.
+    const focusInput = () => { if (document.activeElement !== input) input?.focus(); };
+    const onWindowFocus = () => focusInput();
+    window.addEventListener("focus", onWindowFocus);
+    const retries = [50, 150, 400, 900].map(ms => setTimeout(focusInput, ms));
     window.addEventListener("keydown", onKeydown);
     return () => {
       void unlisten.then(u => u());
+      window.removeEventListener("focus", onWindowFocus);
+      retries.forEach(clearTimeout);
       window.removeEventListener("keydown", onKeydown);
     };
   });
 
-  function parse(raw: string): { title: string; classId: number | null; estimate: number | null; scheduledToday: boolean } {
-    const lower = raw.toLowerCase();
-    const matchedClass = classes.find(c => lower.includes(c.course_code.toLowerCase()));
-    const durationMatch = raw.match(/(\d+)\s*m(?:in(?:ute)?s?)?/i);
-    const scheduledToday = lower.includes("today") || !lower.includes("tomorrow");
-    const removable = new RegExp(
-      `\\b(?:${classes.map(c => c.course_code.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")}|\\d+\\s*m(?:in(?:ute)?s?)?|today|tomorrow)\\b`,
-      "gi",
-    );
-    const title = raw.replace(removable, "").replace(/\s+/g, " ").trim();
-    return {
-      title,
-      classId: matchedClass?.id ?? classes[0]?.id ?? null,
-      estimate: durationMatch ? Number(durationMatch[1]) : null,
-      scheduledToday,
-    };
-  }
-
   async function submit() {
     const raw = shorthand.trim();
     if (!raw || busy) return;
-    const { title, classId, estimate, scheduledToday } = parse(raw);
+    const { title, classId, estimate, scheduledDate } = parseQuickCapture(raw, classes);
     if (!title || classId === null) {
       error = classes.length === 0 ? "Create a class in TaskTimer first." : "Couldn't tell what to add.";
       return;
@@ -64,7 +57,7 @@
         description: null,
         priority: null,
         due_at: null,
-        scheduled_date: scheduledToday ? new Date().toISOString().slice(0, 10) : null,
+        scheduled_date: scheduledDate,
         estimated_minutes: estimate,
         task_type: "assignment",
         tags: [],

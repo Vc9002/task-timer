@@ -13,6 +13,8 @@
     "macOSPrivateApi": true,
     "windows": [
       {
+        "label": "main",
+        "create": false,
         "title": "TaskTimer",
         "width": 980,
         "height": 700,
@@ -22,6 +24,7 @@
       },
       {
         "label": "quick-capture",
+        "create": false,
         "url": "/quick-capture",
         "title": "Quick Add",
         "width": 460,
@@ -37,6 +40,7 @@
       },
       {
         "label": "mini-timer",
+        "create": false,
         "url": "/mini-timer",
         "title": "TaskTimer — Mini",
         "width": 300,

@@ -160,7 +160,7 @@ pub fn list_study_blocks_for_task(db: State<Db>, task_id: i64) -> Result<Vec<Stu
     result
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_study_blocks_for_range(
     db: State<Db>,
     start_date: String,

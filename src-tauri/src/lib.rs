@@ -51,6 +51,16 @@ use timer::{
     pause_timer, recover_timer, resume_timer, start_class_timer, start_timer, switch_timer,
 };
 
+/// Debug builds only: `TASKTIMER_DATA_DIR` points the app at a scratch database
+/// so development and testing never touch real data. Release builds ignore it.
+fn dev_data_dir_override() -> Option<std::path::PathBuf> {
+    if cfg!(debug_assertions) {
+        std::env::var_os("TASKTIMER_DATA_DIR").map(std::path::PathBuf::from)
+    } else {
+        None
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let autostart = tauri_plugin_autostart::Builder::new().arg("--autostart");
@@ -67,10 +77,11 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .setup(|app| {
-            let app_data_dir = app
-                .path()
-                .app_data_dir()
-                .expect("failed to resolve app data dir");
+            let app_data_dir = dev_data_dir_override().unwrap_or_else(|| {
+                app.path()
+                    .app_data_dir()
+                    .expect("failed to resolve app data dir")
+            });
             let conn = db::open(&app_data_dir).expect("failed to open database");
             app.manage(Db(Mutex::new(conn)));
             if let Err(error) = todoist::sync::recover_inflight_outbox(&app.state::<Db>()) {
@@ -80,7 +91,7 @@ pub fn run() {
                 shown_at: std::sync::Mutex::new(std::time::Instant::now()),
             });
             tray::setup(app.handle())?;
-            desktop::setup(app.handle())?;
+            let start_hidden = desktop::setup(app.handle())?;
             reminders::setup(app.handle());
             idle::setup(app.handle());
             weekly_review::setup(app.handle());
@@ -91,6 +102,12 @@ pub fn run() {
             // Todoist is intentionally opt-in at runtime. Avoid reading the OS
             // keychain during startup; users can sync explicitly from Settings.
 
+            // The main window is created last, and by hand ("create": false in
+            // tauri.conf.json). Windows built automatically exist before this
+            // hook runs, so their pages could call commands before the database
+            // and other state above were registered ("state not managed").
+            tray::create_main_window(app.handle(), !start_hidden)?;
+
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -99,9 +116,8 @@ pub fn run() {
             }
             if window.label() == "quick-capture"
                 && matches!(event, tauri::WindowEvent::Focused(false))
-                && !tray::quick_capture_blur_is_spurious(window.app_handle())
             {
-                let _ = window.hide();
+                tray::on_quick_capture_blur(window);
             }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 let hide = window

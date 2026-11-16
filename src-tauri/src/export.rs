@@ -68,6 +68,16 @@ fn json_to_sql(value: &serde_json::Value) -> rusqlite::types::Value {
     }
 }
 
+/// Column names come from the backup file's JSON keys and are spliced into SQL,
+/// so only plain identifiers are accepted.
+fn is_plain_identifier(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars
+        .next()
+        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
 /// Replaces every row in `table` with the given backup rows, preserving each
 /// row's original id. Column list comes from each row's own JSON keys, so
 /// this tolerates schema drift between the backup's app version and this one
@@ -84,6 +94,9 @@ fn restore_table(
             continue;
         };
         let columns: Vec<&String> = object.keys().collect();
+        if let Some(bad) = columns.iter().find(|c| !is_plain_identifier(c)) {
+            return Err(format!("Backup contains an invalid column name: {bad}"));
+        }
         let placeholders = vec!["?"; columns.len()].join(",");
         let column_list = columns
             .iter()
@@ -108,6 +121,17 @@ fn restore_table(
 /// (Study Blocks, milestones, exams) that survives; anything left pointing at
 /// an id the backup doesn't have is pruned afterward rather than left dangling.
 fn restore_backup(conn: &mut rusqlite::Connection, bytes: &[u8]) -> Result<(), String> {
+    // Foreign keys are switched off for the swap. They must come back on whether
+    // or not it succeeds: this is the app's single shared connection, so a failed
+    // restore would otherwise leave constraint enforcement off until restart.
+    let result = restore_backup_unchecked(conn, bytes);
+    let reenabled = conn
+        .execute_batch("PRAGMA foreign_keys = ON")
+        .map_err(|e| e.to_string());
+    result.and(reenabled)
+}
+
+fn restore_backup_unchecked(conn: &mut rusqlite::Connection, bytes: &[u8]) -> Result<(), String> {
     let backup: serde_json::Value =
         serde_json::from_slice(bytes).map_err(|_| "That file isn't a TaskTimer backup.")?;
     if backup["format_version"].as_i64() != Some(1) {
@@ -164,8 +188,6 @@ fn restore_backup(conn: &mut rusqlite::Connection, bytes: &[u8]) -> Result<(), S
     )
     .map_err(|e| e.to_string())?;
     tx.commit().map_err(|e| e.to_string())?;
-    conn.execute_batch("PRAGMA foreign_keys = ON")
-        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -427,5 +449,51 @@ mod tests {
         assert!(ics.contains("DTSTART:20260918T143000"));
         assert!(ics.contains("DTEND:20260918T160000"));
         assert!(ics.contains("DTSTART;VALUE=DATE:20260919"));
+    }
+
+    #[test]
+    fn failed_restore_rolls_back_and_keeps_foreign_keys_on() {
+        let mut conn = crate::db::test_connection();
+        conn.execute_batch(
+            "INSERT INTO classes(id,course_code,semester) VALUES(1,'LGST','Fall');
+             INSERT INTO tasks(id,class_id,title) VALUES(1,1,'Keep me');",
+        )
+        .unwrap();
+        // Task status violates the CHECK constraint, so the restore must fail.
+        let backup = serde_json::json!({
+            "format_version": 1,
+            "classes": [{"id": 1, "course_code": "NEW", "semester": "Fall"}],
+            "tasks": [{"id": 1, "class_id": 1, "title": "Bad", "status": "bogus"}],
+        });
+        assert!(restore_backup(&mut conn, backup.to_string().as_bytes()).is_err());
+        let fk: i64 = conn
+            .query_row("PRAGMA foreign_keys", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            fk, 1,
+            "foreign keys must be re-enabled after a failed restore"
+        );
+        let title: String = conn
+            .query_row("SELECT title FROM tasks WHERE id=1", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(title, "Keep me");
+    }
+
+    #[test]
+    fn restore_rejects_column_names_that_are_not_plain_identifiers() {
+        let mut conn = crate::db::test_connection();
+        let backup = serde_json::json!({
+            "format_version": 1,
+            "classes": [{"id": 1, "course_code": "X", "semester": "Fall", "id) VALUES (1); --": 1}],
+        });
+        let err = restore_backup(&mut conn, backup.to_string().as_bytes()).unwrap_err();
+        assert!(err.contains("invalid column name"), "{err}");
+        let fk: i64 = conn
+            .query_row("PRAGMA foreign_keys", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(fk, 1);
+        assert!(is_plain_identifier("created_at"));
+        assert!(!is_plain_identifier("1abc"));
+        assert!(!is_plain_identifier(""));
     }
 }

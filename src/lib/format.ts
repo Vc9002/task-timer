@@ -31,3 +31,24 @@ export function formatSignedDurationShort(deltaSeconds: number): string {
 export function localDate(date = new Date()): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
+
+/**
+ * Short label for a due date such as "Nov 15". Date-only values are floating
+ * local days, so they are never passed through `new Date(string)`, which would
+ * read them as UTC and show the previous day west of Greenwich. Timestamps
+ * are shown on the local day, matching how the backend decides "overdue".
+ */
+/** The backend reads a timestamp with no zone as UTC (SQLite `date(x,'localtime')`); do the same. */
+function withUtcZone(timestamp: string): string {
+  const iso = timestamp.replace(" ", "T");
+  return /(?:Z|[+-]\d{2}:?\d{2})$/i.test(iso) ? iso : `${iso}Z`;
+}
+
+export function formatDue(dueAt: string, locale?: string): string {
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dueAt);
+  const date = dateOnly
+    ? new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]))
+    : new Date(withUtcZone(dueAt));
+  if (Number.isNaN(date.getTime())) return dueAt.slice(0, 10);
+  return date.toLocaleDateString(locale, { month: "short", day: "numeric" });
+}

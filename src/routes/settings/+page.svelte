@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { localDate } from "$lib/format";
   import DesktopSettings from "$lib/components/DesktopSettings.svelte";
   import ThemeSettings from "$lib/components/ThemeSettings.svelte";
   import UpdateSettings from "$lib/components/UpdateSettings.svelte";
@@ -40,7 +41,7 @@
   let recurringTitle = $state("");
   let recurringClass = $state<number | null>(null);
   let recurringType = $state<RecurringTemplate["recurrence_type"]>("weekly");
-  let recurringStart = $state(new Date().toISOString().slice(0, 10));
+  let recurringStart = $state(localDate());
   let recurringEstimate = $state("");
   let editingRecurring = $state<number | null>(null);
   let outbox = $state<TodoistOutboxEntry[]>([]);

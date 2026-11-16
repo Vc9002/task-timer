@@ -198,7 +198,7 @@ pub(crate) fn plan_proposal_for(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_plan_proposal(db: State<Db>, input: PlanRequest) -> Result<PlanProposal, String> {
     let conn = db.0.lock().map_err(|e| e.to_string())?;
     plan_proposal_for(&conn, &input.start_date, input.days)

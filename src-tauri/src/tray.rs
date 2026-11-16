@@ -7,8 +7,8 @@ use std::{
 };
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
-    tray::TrayIconBuilder,
-    AppHandle, Emitter, Manager,
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    AppHandle, Emitter, Manager, WebviewWindow, WebviewWindowBuilder,
 };
 
 pub struct QuickCaptureState {
@@ -21,8 +21,43 @@ pub struct QuickCaptureState {
 /// this window after showing.
 const BLUR_GRACE_PERIOD: Duration = Duration::from_millis(400);
 
+/// The quick-capture popover dismisses itself when the user clicks away.
+///
+/// A blur event alone is not proof of that. On Windows the window also reports
+/// losing focus when focus moves into its own webview, and when the window is
+/// created on first use that happens whenever the page finishes loading, long
+/// after any fixed grace period. So on Windows the popover is hidden only if,
+/// a moment later, some other window really is in the foreground.
+pub fn on_quick_capture_blur(window: &tauri::Window) {
+    #[cfg(target_os = "windows")]
+    {
+        let window = window.clone();
+        thread::spawn(move || {
+            thread::sleep(Duration::from_millis(150));
+            if !is_foreground_window(&window) {
+                let _ = window.hide();
+            }
+        });
+    }
+    #[cfg(not(target_os = "windows"))]
+    if !quick_capture_blur_is_spurious(window.app_handle()) {
+        let _ = window.hide();
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn is_foreground_window(window: &tauri::Window) -> bool {
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+    let Ok(hwnd) = window.hwnd() else {
+        return false;
+    };
+    let foreground = unsafe { GetForegroundWindow() };
+    foreground as isize == hwnd.0 as isize
+}
+
 /// Whether a `Focused(false)` event on the quick-capture window this soon
 /// after showing it should be ignored as spurious.
+#[cfg_attr(target_os = "windows", allow(dead_code))]
 pub fn quick_capture_blur_is_spurious(app: &AppHandle) -> bool {
     app.try_state::<QuickCaptureState>()
         .map(|state| {
@@ -33,6 +68,76 @@ pub fn quick_capture_blur_is_spurious(app: &AppHandle) -> bool {
                 .unwrap_or(false)
         })
         .unwrap_or(false)
+}
+
+/// Serializes first-use window creation so two quick triggers build one window.
+static WINDOW_CREATION: Mutex<()> = Mutex::new(());
+
+/// Runs `then` with the window `label`, creating it from its `tauri.conf.json`
+/// entry on first use.
+///
+/// The quick-capture and mini-timer windows are declared with `"create": false`
+/// so an idle app does not carry two extra hidden webviews. Creation happens on
+/// its own thread: building a window from a synchronous command or an event
+/// handler deadlocks on Windows (see `WebviewWindowBuilder::build`).
+fn with_lazy_window(
+    app: &AppHandle,
+    label: &'static str,
+    then: impl FnOnce(&AppHandle, WebviewWindow) + Send + 'static,
+) {
+    if let Some(window) = app.get_webview_window(label) {
+        then(app, window);
+        return;
+    }
+    let app = app.clone();
+    thread::spawn(move || {
+        let window = {
+            let _creating = WINDOW_CREATION.lock().unwrap_or_else(|e| e.into_inner());
+            match app.get_webview_window(label) {
+                Some(window) => Ok(window),
+                None => create_window(&app, label),
+            }
+        };
+        match window {
+            Ok(window) => then(&app, window),
+            Err(error) => {
+                eprintln!("Couldn't open the {label} window: {error}");
+                let _ = app.emit(
+                    "desktop-error",
+                    "TaskTimer couldn't open that window. Try again.",
+                );
+            }
+        }
+    });
+}
+
+/// Builds the main window from its config entry. Called at the end of setup,
+/// once every piece of state its page may ask for is registered.
+pub fn create_main_window(app: &AppHandle, visible: bool) -> Result<(), String> {
+    let config = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|window| window.label == "main")
+        .ok_or("no main window in the app config")?;
+    WebviewWindowBuilder::from_config(app, config)
+        .and_then(|builder| builder.visible(visible).build())
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+fn create_window(app: &AppHandle, label: &str) -> Result<WebviewWindow, String> {
+    let config = app
+        .config()
+        .app
+        .windows
+        .iter()
+        .find(|window| window.label == label)
+        .ok_or_else(|| format!("no window named {label} in the app config"))?;
+    WebviewWindowBuilder::from_config(app, config)
+        .and_then(|builder| builder.build())
+        .map_err(|e| e.to_string())
 }
 
 pub struct TrayState {
@@ -67,7 +172,9 @@ pub fn show(app: &AppHandle) {
 /// Shows the small always-on-top quick-capture popover without touching the
 /// main window, so adding a task doesn't interrupt whatever you're doing.
 pub fn show_quick_capture(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window("quick-capture") {
+    with_lazy_window(app, "quick-capture", |app, window| {
+        // Stamp the time here, after any first-use creation, so the blur grace
+        // period starts when the window is actually shown.
         if let Some(state) = app.try_state::<QuickCaptureState>() {
             if let Ok(mut shown_at) = state.shown_at.lock() {
                 *shown_at = Instant::now();
@@ -77,7 +184,7 @@ pub fn show_quick_capture(app: &AppHandle) {
         let _ = window.show();
         let _ = window.set_focus();
         let _ = app.emit("quick-capture-shown", ());
-    }
+    });
 }
 
 #[tauri::command]
@@ -90,7 +197,12 @@ pub fn hide_quick_capture(app: AppHandle) {
 #[tauri::command]
 pub fn toggle_mini_timer(app: AppHandle) -> Result<bool, String> {
     let Some(window) = app.get_webview_window("mini-timer") else {
-        return Err("Mini timer window unavailable".into());
+        // First use: create it, then show it.
+        with_lazy_window(&app, "mini-timer", |_, window| {
+            let _ = window.show();
+            let _ = window.set_focus();
+        });
+        return Ok(true);
     };
     let visible = window.is_visible().map_err(|e| e.to_string())?;
     if visible {
@@ -166,19 +278,13 @@ fn refresh(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         let conn = db.0.lock().map_err(|_| "Timer unavailable")?;
         timer::core_get_active_session(&conn).map_err(|_| "Timer unavailable")?
     };
-    state.label.set_text(
-        active
-            .as_ref()
-            .map(|a| {
-                format!(
-                    "{} — {} · {}",
-                    a.class_course_code,
-                    a.task_title,
-                    elapsed_label(a.elapsed_seconds)
-                )
-            })
-            .unwrap_or_else(|| "No active timer".into()),
-    )?;
+    let status = status_line(active.as_ref());
+    state.label.set_text(&status)?;
+    if let Some(tray) = app.tray_by_id(TRAY_ID) {
+        // Hovering the icon answers "what am I tracking?" without opening anything.
+        // Best-effort: a tooltip failure must not stop the menu items updating.
+        let _ = tray.set_tooltip(Some(format!("TaskTimer\n{status}")));
+    }
     state
         .pause
         .set_text(if active.as_ref().is_some_and(|a| a.is_paused) {
@@ -189,6 +295,21 @@ fn refresh(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     state.pause.set_enabled(active.is_some())?;
     state.finish.set_enabled(active.is_some())?;
     Ok(())
+}
+
+const TRAY_ID: &str = "tasktimer";
+
+fn status_line(active: Option<&timer::ActiveSessionInfo>) -> String {
+    match active {
+        Some(a) => format!(
+            "{} — {} · {}{}",
+            a.class_course_code,
+            a.task_title,
+            elapsed_label(a.elapsed_seconds),
+            if a.is_paused { " (paused)" } else { "" }
+        ),
+        None => "No active timer".into(),
+    }
 }
 
 fn elapsed_label(seconds: i64) -> String {
@@ -222,9 +343,25 @@ pub fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         pomodoro,
         pending: Mutex::new(None),
     });
-    let mut builder = TrayIconBuilder::with_id("tasktimer")
+    // On Windows a left-click opens the app and the menu is on right-click.
+    // macOS keeps its convention: clicking a menu-bar icon opens the menu.
+    let click_opens_app = cfg!(target_os = "windows");
+    let mut builder = TrayIconBuilder::with_id(TRAY_ID)
         .tooltip("TaskTimer")
-        .menu(&menu);
+        .menu(&menu)
+        .show_menu_on_left_click(!click_opens_app)
+        .on_tray_icon_event(move |tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                if click_opens_app {
+                    show(tray.app_handle());
+                }
+            }
+        });
     if let Some(icon) = app.default_window_icon() {
         builder = builder.icon(icon.clone());
     }
@@ -245,8 +382,10 @@ pub fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let handle = app.clone();
     thread::spawn(move || loop {
         thread::sleep(Duration::from_secs(60));
-        if refresh(&handle).is_err() {
-            break;
+        // A transient failure (e.g. a menu update racing shutdown) must not stop
+        // the elapsed-time label from ever updating again.
+        if let Err(error) = refresh(&handle) {
+            eprintln!("Tray refresh: {error}");
         }
     });
     Ok(())
@@ -281,7 +420,35 @@ pub fn list_startable_tasks(db: tauri::State<Db>) -> Result<Vec<PickerTask>, Str
 
 #[cfg(test)]
 mod tests {
-    use super::elapsed_label;
+    use super::{elapsed_label, status_line};
+    use crate::timer::{ActiveSessionInfo, Session};
+
+    #[test]
+    fn status_line_names_the_task_and_marks_a_pause() {
+        let mut active = ActiveSessionInfo {
+            session: Session {
+                id: 1,
+                task_id: 1,
+                start_ts: "2026-09-15 10:00:00".into(),
+                end_ts: None,
+                accumulated_pause_seconds: 0,
+                pause_started_ts: None,
+                final_duration_seconds: None,
+                edited: false,
+            },
+            task_title: "Case brief".into(),
+            class_course_code: "LGST".into(),
+            is_paused: false,
+            elapsed_seconds: 3661,
+        };
+        assert_eq!(status_line(Some(&active)), "LGST — Case brief · 1:01");
+        active.is_paused = true;
+        assert_eq!(
+            status_line(Some(&active)),
+            "LGST — Case brief · 1:01 (paused)"
+        );
+        assert_eq!(status_line(None), "No active timer");
+    }
 
     #[test]
     fn elapsed_label_is_compact_and_minute_accurate() {

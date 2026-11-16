@@ -1,9 +1,10 @@
 import { getPomodoroSettings, notifyPomodoroPhase, setTrayPomodoroStatus, type PomodoroSettings } from "$lib/api";
 import { timerStore } from "$lib/stores/timer.svelte";
 import { formatHms } from "$lib/format";
-
-type Phase = "idle" | "work" | "break";
-const CYCLES_PER_LONG_BREAK = 4;
+import {
+  STORAGE_KEY, isLongBreak, parsePersisted, phaseMinutes, secondsRemaining, trayLabel,
+  type ActivePhase, type Phase, type PersistedState,
+} from "$lib/pomodoro-machine";
 
 class PomodoroStore {
   phase = $state<Phase>("idle");
@@ -11,8 +12,10 @@ class PomodoroStore {
   onLongBreak = $state(false);
   settings = $state<PomodoroSettings>({ work_minutes: 25, break_minutes: 5, long_break_minutes: 15 });
   private tickHandle: ReturnType<typeof setInterval> | null = null;
-  private pausedByPomodoro = false;
+  private pausedSessionId: number | null = null;
   private completedWorkCycles = 0;
+  private deadlineMs = 0;
+  private transitioning = false;
 
   async loadSettings() {
     try {
@@ -20,69 +23,124 @@ class PomodoroStore {
     } catch {
       // keep defaults; Settings page surfaces the real error on save
     }
+    try {
+      const saved = parsePersisted(localStorage.getItem(STORAGE_KEY));
+      if (saved) {
+        this.phase = saved.phase;
+        this.deadlineMs = saved.deadlineMs;
+        this.completedWorkCycles = saved.completedWorkCycles;
+        this.onLongBreak = saved.onLongBreak;
+        this.pausedSessionId = saved.pausedSessionId;
+        this.startTicking();
+        void this.tick();
+      }
+    } catch { localStorage.removeItem(STORAGE_KEY); }
+  }
+
+  private startTicking() {
+    this.tickHandle ??= setInterval(() => void this.tick(), 1000);
+  }
+
+  private persist() {
+    if (this.phase === "idle") { localStorage.removeItem(STORAGE_KEY); return; }
+    const state: PersistedState = { phase: this.phase, deadlineMs: this.deadlineMs, completedWorkCycles: this.completedWorkCycles, onLongBreak: this.onLongBreak, pausedSessionId: this.pausedSessionId };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  }
+
+  private async releaseOwnedPause(): Promise<boolean> {
+    const id = this.pausedSessionId;
+    if (id !== null && timerStore.active?.session.id === id && timerStore.active.is_paused) {
+      await timerStore.resume();
+      if (timerStore.active?.session.id === id && timerStore.active.is_paused) return false;
+    }
+    this.pausedSessionId = null;
+    this.persist();
+    return true;
+  }
+
+  // timerStore ignores a call while another change is in flight, so retry briefly.
+  private async pauseSession(id: number): Promise<boolean> {
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const active = timerStore.active;
+      if (active?.session.id !== id) return false;
+      if (active.is_paused) return true;
+      await timerStore.pause();
+      if (timerStore.active?.session.id === id && timerStore.active.is_paused) return true;
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    }
+    return false;
   }
 
   private pushTrayStatus() {
-    const phaseLabel = this.phase === "work" ? "Focus" : this.onLongBreak ? "Long break" : "Break";
-    void setTrayPomodoroStatus(`Pomodoro: ${phaseLabel} ${formatHms(this.remainingSeconds)}`);
+    if (this.phase === "idle") return;
+    void setTrayPomodoroStatus(`Pomodoro: ${trayLabel(this.phase, this.onLongBreak)} ${formatHms(this.remainingSeconds)}`);
   }
 
-  private tick() {
-    this.remainingSeconds -= 1;
+  private async tick() {
+    if (this.phase === "idle" || this.transitioning) return;
+    this.remainingSeconds = secondsRemaining(this.deadlineMs, Date.now());
     if (this.remainingSeconds % 15 === 0) this.pushTrayStatus();
     if (this.remainingSeconds > 0) return;
-    if (this.phase === "work") {
-      void notifyPomodoroPhase("work_done");
-      this.completedWorkCycles += 1;
-      if (timerStore.active && !timerStore.active.is_paused) {
-        this.pausedByPomodoro = true;
-        void timerStore.pause();
-      }
-      this.beginPhase("break");
-    } else if (this.phase === "break") {
-      void notifyPomodoroPhase("break_done");
-      if (this.pausedByPomodoro && timerStore.active?.is_paused) {
-        void timerStore.resume();
-      }
-      this.pausedByPomodoro = false;
-      this.beginPhase("work");
-    }
+    await this.transition();
   }
 
-  private beginPhase(phase: "work" | "break") {
+  private async transition() {
+    if (this.phase === "idle" || this.transitioning) return;
+    this.transitioning = true;
+    try {
+      if (this.phase === "work") {
+        void notifyPomodoroPhase("work_done");
+        this.completedWorkCycles += 1;
+        if (timerStore.active && !timerStore.active.is_paused) {
+          const id = timerStore.active.session.id;
+          if (await this.pauseSession(id)) this.pausedSessionId = id;
+        }
+        this.beginPhase("break");
+      } else if (this.phase === "break") {
+        if (!await this.releaseOwnedPause()) return;
+        this.beginPhase("work");
+        void notifyPomodoroPhase("break_done");
+      }
+      this.pushTrayStatus();
+    } finally { this.transitioning = false; }
+  }
+
+  private beginPhase(phase: ActivePhase) {
     this.phase = phase;
-    this.onLongBreak = phase === "break" && this.completedWorkCycles % CYCLES_PER_LONG_BREAK === 0;
-    const minutes = phase === "work"
-      ? this.settings.work_minutes
-      : this.onLongBreak
-        ? this.settings.long_break_minutes
-        : this.settings.break_minutes;
+    this.onLongBreak = isLongBreak(phase, this.completedWorkCycles);
+    const minutes = phaseMinutes(this.settings, phase, this.onLongBreak);
     this.remainingSeconds = minutes * 60;
+    this.deadlineMs = Date.now() + minutes * 60_000;
+    this.persist();
   }
 
   start() {
     if (this.phase !== "idle") return;
     this.beginPhase("work");
     this.pushTrayStatus();
-    this.tickHandle ??= setInterval(() => this.tick(), 1000);
+    this.startTicking();
   }
 
-  skip() {
+  async skip() {
     if (this.phase === "idle") return;
-    if (this.phase === "work") this.completedWorkCycles += 1;
-    this.beginPhase(this.phase === "work" ? "break" : "work");
-    this.pushTrayStatus();
+    await this.transition();
   }
 
-  stop() {
-    this.phase = "idle";
-    this.remainingSeconds = 0;
-    this.pausedByPomodoro = false;
-    this.completedWorkCycles = 0;
-    this.onLongBreak = false;
-    if (this.tickHandle !== null) clearInterval(this.tickHandle);
-    this.tickHandle = null;
-    void setTrayPomodoroStatus(null);
+  async stop() {
+    if (this.transitioning) return;
+    this.transitioning = true;
+    try {
+      if (!await this.releaseOwnedPause()) return;
+      this.phase = "idle";
+      this.remainingSeconds = 0;
+      this.completedWorkCycles = 0;
+      this.onLongBreak = false;
+      this.deadlineMs = 0;
+      if (this.tickHandle !== null) clearInterval(this.tickHandle);
+      this.tickHandle = null;
+      this.persist();
+      void setTrayPomodoroStatus(null);
+    } finally { this.transitioning = false; }
   }
 }
 

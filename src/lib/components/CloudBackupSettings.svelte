@@ -54,7 +54,7 @@
 
 <section>
   <h2>Auto backup to folder</h2>
-  <p class="muted">Writes a timestamped backup snapshot into a folder you choose (e.g. inside iCloud Drive or Dropbox) once a day, keeping the most recent 30.</p>
+  <p class="muted">Writes a timestamped backup snapshot into a folder you choose (such as OneDrive, iCloud Drive, or Dropbox) once a day, keeping the most recent 30.</p>
   {#if error}<p class="error">{error}</p>{/if}
   <label class="backup-toggle"><input type="checkbox" bind:checked={enabled} /> Back up automatically</label>
   <div class="backup-folder">

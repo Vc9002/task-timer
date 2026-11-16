@@ -22,8 +22,8 @@
       data-tauri-drag-region
     ></span>
     <div class="info" data-tauri-drag-region>
-      <strong>{timerStore.active.task_title}</strong>
       <span class="clock">{formatHms(timerStore.displaySeconds)}</span>
+      <span class="task">{timerStore.active.is_paused ? "Paused · " : ""}{timerStore.active.task_title}</span>
     </div>
     <div class="actions">
       <button
@@ -39,16 +39,17 @@
 </div>
 
 <style>
-  :global(html), :global(body) { background: transparent; }
-  .mini { position: relative; display: flex; align-items: center; gap: 10px; height: 100vh; box-sizing: border-box; padding: 0 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
-  .close-btn { position: absolute; top: 3px; right: 5px; min-height: 0; width: 16px; height: 16px; padding: 0; border: 0; background: transparent; color: var(--muted); font-size: 13px; line-height: 1; border-radius: 50%; z-index: 1; }
+  :global(html), :global(body) { background: transparent; overflow: hidden; }
+  :global(body) { min-width: 0; }
+  .mini { position: relative; display: flex; align-items: center; gap: 9px; width: 100vw; height: 100vh; box-sizing: border-box; padding: 0 10px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+  .close-btn { order: 3; flex-shrink: 0; min-height: 0; width: 16px; height: 16px; padding: 0; border: 0; background: transparent; color: var(--muted); font-size: 13px; line-height: 1; border-radius: 50%; }
   .close-btn:hover { background: var(--hover); color: var(--text); }
-  .dot { width: 8px; height: 8px; border-radius: 50%; background: #4caf6a; flex-shrink: 0; }
-  .dot.paused { background: #c59442; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); flex-shrink: 0; }
+  .dot.paused { background: var(--warn); }
   .dot.error { background: var(--danger); }
-  .info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-  .info strong { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .clock { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .info { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.25; }
+  .task { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .clock { font-size: 17px; font-weight: 600; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
   .actions { display: flex; gap: 4px; }
   .actions button { min-height: 26px; min-width: 26px; padding: 0; font-size: 13px; }
   .empty { color: var(--muted); font-size: 12px; }

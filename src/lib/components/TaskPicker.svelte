@@ -30,7 +30,7 @@
   <div class="results" bind:this={resultsElement}>
     {#each results as task, i (task.id)}
       <button data-index={i} class:selected={i === selected} aria-pressed={i === selected} disabled={timerStore.busy} onclick={() => start(task)}><small>{task.course_code}</small> {task.title}</button>
-    {:else}<p>{loading ? "Loading…" : "No incomplete tasks found."}</p>{/each}
+    {:else}<p class="none">{loading ? "Loading…" : query ? `No tasks match “${query}”.` : "No incomplete tasks yet. Add one with Quick Add."}</p>{/each}
   </div>
   {#if error || timerStore.error}<p role="alert">{error || timerStore.error}</p>{/if}
 </Modal>
@@ -39,7 +39,8 @@ input { display: block; width: 100%; margin-top: 6px; }
   label { font-size: 12px; color: var(--muted); }
   .hint { font-size: 10px; color: var(--muted); margin: 10px 0 15px; }
   .results { max-height: 45vh; overflow: auto; }
-  button { display: block; width: 100%; text-align: left; padding: 12px; border: 1px solid transparent; background: transparent; color: var(--text); margin-bottom: 4px; }
+  button { display: block; width: 100%; text-align: left; padding: 9px 12px; border: 1px solid transparent; background: transparent; color: var(--text); margin-bottom: 4px; }
   button.selected { background: var(--accent-soft); border-color: var(--accent); }
+  .none { color: var(--muted); font-size: 13px; padding: 8px 2px; }
   small { display: block; font-size: 10px; margin-bottom: 4px; color: var(--muted); font-weight: 500; }
 </style>
